@@ -1,0 +1,23 @@
+---
+title: 2026-04 pnpm and Docker Dev Flow
+description: Standardized the monorepo on pnpm and added a one-command Docker Compose flow with hot reload.
+section: Changelog
+order: 20
+surfaces:
+  - web
+  - admin
+  - cli
+related:
+  - /docs/getting-started/docker-development
+  - /docs/changelog/2026-04-foundation
+---
+
+# 2026-04 pnpm and Docker Dev Flow
+
+This update standardizes local development around `pnpm` and adds a Docker Compose workflow for the web app.
+
+- `pnpm` is now the workspace package manager
+- `pnpm-workspace.yaml` is the source of truth for workspace discovery
+- `compose.yml` starts the web app and Postgres together
+- file polling is enabled for reliable hot reload in Docker
+- the web production Dockerfile now understands the monorepo layout

@@ -168,11 +168,20 @@ Clone the repo:
 git clone https://github.com/Kiranism/next-shadcn-dashboard-starter.git
 ```
 
-- `bun install`
+- `pnpm install`
 - Create a `.env.local` file by copying the example environment file:
-  `cp env.example.txt .env.local`
-- Add the required environment variables to the `.env.local` file.
-- `bun run dev`
+  `cp apps/web/env.example.txt apps/web/.env.local`
+- Add the required environment variables to `apps/web/.env.local`.
+- `pnpm dev`
+
+For Docker-based local development with Postgres and hot reload:
+
+- `pnpm docker:dev`
+- `pnpm docker:dev:logs`
+- `pnpm docker:dev:down`
+- `pnpm docker:dev:reset` if you want a clean dependency/database volume state
+
+Make sure your Docker daemon or Docker Desktop is running before you start the dev stack.
 
 ##### Environment Configuration Setup
 
@@ -204,20 +213,14 @@ Run `node scripts/cleanup.js --help` for all options. Delete `scripts/cleanup.js
 
 ## Deploy
 
-This project includes production-ready Dockerfiles (`Dockerfile` for Node.js, `Dockerfile.bun` for Bun) using standalone output mode. For all deployment options, see the [Next.js Deployment Documentation](https://nextjs.org/docs/app/getting-started/deploying).
+This project includes a production-ready Dockerfile for the web app plus a root `compose.yml` for local development with hot reload. `Dockerfile.dev` is for local development only, while `apps/web/Dockerfile` builds the production web image. For all deployment options, see the [Next.js Deployment Documentation](https://nextjs.org/docs/app/getting-started/deploying).
 
 ### Docker
 
 **Build the image:**
 
 ```bash
-# Node.js
-docker build \
-  --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx \
-  -t shadcn-dashboard .
-
-# OR Bun
-docker build -f Dockerfile.bun \
+docker build -f apps/web/Dockerfile \
   --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_xxxxx \
   -t shadcn-dashboard .
 ```

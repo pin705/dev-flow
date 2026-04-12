@@ -1,0 +1,47 @@
+---
+title: Docker Development
+description: Run Devflow with Docker Compose, Postgres, pnpm, and hot reload in one command.
+section: Getting Started
+order: 15
+surfaces:
+  - web
+  - admin
+  - cli
+related:
+  - /docs/getting-started/5-minute-quickstart
+  - /docs/getting-started/install-cli
+---
+
+# Docker Development
+
+Use Docker Compose when you want the web app and Postgres to boot together with hot reload.
+
+## Start the stack
+
+```bash
+pnpm install
+pnpm docker:dev
+```
+
+This brings up:
+
+- `web` on `http://localhost:3000`
+- `postgres` on `localhost:5432`
+
+Make sure Docker Desktop or your local Docker daemon is running before you start the stack.
+
+## Why this setup
+
+- `pnpm` is the workspace package manager
+- the compose stack mounts the repo for live edits
+- polling is enabled so file watching stays reliable inside Docker
+- the Postgres service matches the `DATABASE_URL` used by the web app
+
+## Useful commands
+
+```bash
+pnpm docker:dev:logs
+pnpm docker:dev:down
+pnpm docker:dev:reset
+pnpm db:generate
+```

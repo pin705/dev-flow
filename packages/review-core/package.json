@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@devflow/contracts": "file:../contracts",
-    "@devflow/policy-engine": "file:../policy-engine"
+    "@devflow/contracts": "workspace:*",
+    "@devflow/policy-engine": "workspace:*"
   }
 }

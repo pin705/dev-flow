@@ -17,8 +17,13 @@
  * circular dependencies.
  */
 
-import { createFormHookContexts, revalidateLogic, useStore } from '@tanstack/react-form';
-import type { AnyFieldApi, DeepKeys } from '@tanstack/form-core';
+import {
+  createFormHookContexts,
+  revalidateLogic,
+  useStore,
+  type AnyFieldApi,
+  type DeepKeys
+} from '@tanstack/react-form';
 import type { VariantProps } from 'class-variance-authority';
 import * as React from 'react';
 import {

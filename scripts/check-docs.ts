@@ -28,7 +28,12 @@ const allowedCommandPrefixes = [
   'devflow tests',
   'devflow history',
   'devflow doctor',
-  'bun install'
+  'pnpm install',
+  'pnpm docker:dev',
+  'pnpm docker:dev:logs',
+  'pnpm docker:dev:down',
+  'pnpm docker:dev:reset',
+  'pnpm db:generate'
 ];
 
 for (const doc of docs) {

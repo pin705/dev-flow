@@ -1,50 +1,45 @@
-# ============================================
-# Stage 1: Install dependencies
-# ============================================
-
 ARG NODE_VERSION=22-slim
+ARG PNPM_VERSION=10.12.4
 
-FROM node:${NODE_VERSION} AS dependencies
+FROM node:${NODE_VERSION} AS base
 
-WORKDIR /app
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
 
-# Install bun to use bun.lock for dependency resolution
-RUN npm install -g bun
-
-# Copy package-related files to leverage Docker cache
-COPY package.json bun.lock* ./
-
-# Install dependencies with frozen lockfile for reproducible builds
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun install --no-save --frozen-lockfile
-
-# ============================================
-# Stage 2: Build the Next.js application
-# ============================================
-
-FROM node:${NODE_VERSION} AS builder
+RUN corepack enable && corepack prepare pnpm@${PNPM_VERSION} --activate
+RUN pnpm config set store-dir /pnpm/store
 
 WORKDIR /app
+
+FROM base AS dependencies
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/cli/package.json apps/cli/package.json
+COPY apps/vscode/package.json apps/vscode/package.json
+COPY packages/contracts/package.json packages/contracts/package.json
+COPY packages/docs-content/package.json packages/docs-content/package.json
+COPY packages/policy-engine/package.json packages/policy-engine/package.json
+COPY packages/review-core/package.json packages/review-core/package.json
+
+RUN --mount=type=cache,target=/pnpm/store pnpm install --frozen-lockfile
+
+FROM base AS builder
 
 COPY --from=dependencies /app/node_modules ./node_modules
+COPY --from=dependencies /app/apps/web/node_modules ./apps/web/node_modules
 COPY . .
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV BUILD_STANDALONE=true
 
-# Build-time env vars — override these with --build-arg or in compose.yml
 ARG NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ARG NEXT_PUBLIC_CLERK_SIGN_IN_URL=/auth/sign-in
 ARG NEXT_PUBLIC_CLERK_SIGN_UP_URL=/auth/sign-up
 ARG NEXT_PUBLIC_SENTRY_DISABLED=true
 
-ENV BUILD_STANDALONE=true
-
-RUN npm run build
-
-# ============================================
-# Stage 3: Production runner
-# ============================================
+RUN pnpm --dir apps/web build
 
 FROM node:${NODE_VERSION} AS runner
 
@@ -52,20 +47,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3000
-ENV HOSTNAME="0.0.0.0"
+ENV HOSTNAME=0.0.0.0
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Copy public assets
-COPY --from=builder --chown=node:node /app/public ./public
-
-# Create .next dir with correct permissions for prerender cache
+COPY --from=builder --chown=node:node /app/apps/web/public ./public
 RUN mkdir .next && chown node:node .next
+COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /app/apps/web/.next/static ./.next/static
 
-# Copy standalone output and static files
-COPY --from=builder --chown=node:node /app/.next/standalone ./
-COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-
-# Run as non-root user
 USER node
 
 EXPOSE 3000

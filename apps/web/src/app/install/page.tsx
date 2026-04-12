@@ -12,7 +12,7 @@ const installCards = [
     title: 'CLI',
     description:
       'Use Devflow from the terminal for login, review, explain, tests, history, and doctor.',
-    steps: ['Install dependencies', 'Run `devflow auth login`', 'Run `devflow doctor`']
+    steps: ['Run `pnpm install`', 'Run `devflow auth login`', 'Run `devflow doctor`']
   },
   {
     title: 'VS Code',
@@ -20,10 +20,9 @@ const installCards = [
     steps: ['Install the extension', 'Sign in', 'Run Review Current Changes']
   },
   {
-    title: 'Admin setup',
-    description:
-      'Configure workspace, provider strategy, policy versions, billing, and audit defaults.',
-    steps: ['Create workspace', 'Publish policy', 'Invite members']
+    title: 'Docker dev stack',
+    description: 'Boot the web app and Postgres together with hot reload for local development.',
+    steps: ['Run `pnpm docker:dev`', 'Open `localhost:3000`', 'Stop with `pnpm docker:dev:down`']
   }
 ];
 
@@ -61,6 +60,9 @@ export default function InstallPage() {
         </Button>
         <Button variant='outline' asChild>
           <Link href='/docs/getting-started/install-vscode-extension'>Open VS Code Guide</Link>
+        </Button>
+        <Button variant='outline' asChild>
+          <Link href='/docs/getting-started/docker-development'>Open Docker Dev Guide</Link>
         </Button>
       </div>
     </main>

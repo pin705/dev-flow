@@ -10,13 +10,13 @@ import {
 } from '@/features/control-plane/server/service';
 
 export default async function OverviewPage() {
-  await requireWorkspaceAccess();
+  const { orgId } = await requireWorkspaceAccess();
 
   const [overviewStats, policyBundles, providerSummaries, reviewSessions] = await Promise.all([
-    getOverviewStats(),
-    listPolicies(),
-    listProviders(),
-    listReviewSessions()
+    getOverviewStats(orgId),
+    listPolicies(orgId),
+    listProviders(orgId),
+    listReviewSessions(orgId)
   ]);
 
   return (

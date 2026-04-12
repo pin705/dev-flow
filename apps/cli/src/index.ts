@@ -168,20 +168,48 @@ async function readJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function fetchApi<T>(baseUrl: string, pathname: string, init?: RequestInit): Promise<T> {
+function createRequestHeaders(config?: LocalConfig, headers?: HeadersInit): Headers {
+  const mergedHeaders = new Headers(headers);
+
+  if (config?.lastDeviceCode) {
+    mergedHeaders.set('authorization', `Bearer ${config.lastDeviceCode}`);
+  }
+
+  return mergedHeaders;
+}
+
+async function fetchApi<T>(
+  baseUrl: string,
+  pathname: string,
+  init?: RequestInit,
+  config?: LocalConfig
+): Promise<T> {
   const url = new URL(pathname, baseUrl).toString();
-  const response = await fetch(url, init);
+  const response = await fetch(url, {
+    ...init,
+    headers: createRequestHeaders(config, init?.headers)
+  });
   return readJson<T>(response);
 }
 
-async function postApi<T>(baseUrl: string, pathname: string, body?: unknown): Promise<T> {
-  return fetchApi<T>(baseUrl, pathname, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json'
+async function postApi<T>(
+  baseUrl: string,
+  pathname: string,
+  body?: unknown,
+  config?: LocalConfig
+): Promise<T> {
+  return fetchApi<T>(
+    baseUrl,
+    pathname,
+    {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: body === undefined ? undefined : JSON.stringify(body)
     },
-    body: body === undefined ? undefined : JSON.stringify(body)
-  });
+    config
+  );
 }
 
 function delay(ms: number): Promise<void> {
@@ -228,7 +256,15 @@ async function tryRemoteLogin(config: LocalConfig): Promise<LocalConfig> {
     throw new Error(`Device approval ended with status: ${approvedSession.status}`);
   }
 
-  const bootstrap = await fetchApi<WorkspaceBootstrap>(apiBaseUrl, '/api/client/bootstrap');
+  const bootstrap = await fetchApi<WorkspaceBootstrap>(
+    apiBaseUrl,
+    '/api/client/bootstrap',
+    undefined,
+    {
+      ...config,
+      lastDeviceCode: approvedSession.deviceCode
+    }
+  );
 
   return {
     ...config,
@@ -271,15 +307,20 @@ async function syncReviewToCloud(config: LocalConfig, session: ReviewSession): P
     workspaceId: config.workspace.id
   };
 
-  await postApi(apiBaseUrl, '/api/client/history', payload);
-  await postApi<UsageEvent>(apiBaseUrl, '/api/client/usage', {
-    workspaceId: config.workspace.id,
-    source: session.commandSource,
-    event: 'sync.uploaded',
-    metadata: {
-      traceId: session.traceId
-    }
-  });
+  await postApi(apiBaseUrl, '/api/client/history', payload, config);
+  await postApi<UsageEvent>(
+    apiBaseUrl,
+    '/api/client/usage',
+    {
+      workspaceId: config.workspace.id,
+      source: session.commandSource,
+      event: 'sync.uploaded',
+      metadata: {
+        traceId: session.traceId
+      }
+    },
+    config
+  );
 }
 
 async function loadHistory(config: LocalConfig): Promise<unknown[]> {
@@ -290,7 +331,9 @@ async function loadHistory(config: LocalConfig): Promise<unknown[]> {
   try {
     const payload = await fetchApi<{ items: unknown[] }>(
       getApiBaseUrl(config),
-      '/api/client/history'
+      '/api/client/history',
+      undefined,
+      config
     );
     return payload.items;
   } catch {
@@ -319,7 +362,9 @@ async function extendDoctorOutput(config: LocalConfig): Promise<unknown[]> {
   try {
     const bootstrap = await fetchApi<WorkspaceBootstrap>(
       config.apiBaseUrl,
-      '/api/client/bootstrap'
+      '/api/client/bootstrap',
+      undefined,
+      config
     );
 
     return [
@@ -415,9 +460,14 @@ async function main() {
 
     if (config.lastDeviceCode && config.apiBaseUrl) {
       try {
-        await postApi(config.apiBaseUrl, '/api/client/device/logout', {
-          deviceCode: config.lastDeviceCode
-        });
+        await postApi(
+          config.apiBaseUrl,
+          '/api/client/device/logout',
+          {
+            deviceCode: config.lastDeviceCode
+          },
+          config
+        );
       } catch {
         // Keep logout resilient even when the control plane is offline.
       }

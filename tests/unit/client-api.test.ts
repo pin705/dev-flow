@@ -10,13 +10,53 @@ import { POST as startDeviceAuth } from '../../apps/web/src/app/api/client/devic
 import { POST as pollDeviceAuth } from '../../apps/web/src/app/api/client/device/poll/route.ts';
 import { POST as logoutDeviceAuth } from '../../apps/web/src/app/api/client/device/logout/route.ts';
 import { POST as postUsage } from '../../apps/web/src/app/api/client/usage/route.ts';
-import { resetControlPlaneState } from '../../apps/web/src/features/control-plane/server/service.ts';
+import {
+  approveDeviceAuth,
+  resetControlPlaneState
+} from '../../apps/web/src/features/control-plane/server/service.ts';
 
 const originalAutoApprove = process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE;
 
+function createAuthorizedRequest(
+  url: string,
+  init?: RequestInit & { deviceCode?: string }
+): Request {
+  const headers = new Headers(init?.headers);
+
+  if (init?.deviceCode) {
+    headers.set('authorization', `Bearer ${init.deviceCode}`);
+  }
+
+  return new Request(url, {
+    ...init,
+    headers
+  });
+}
+
+async function createApprovedDeviceSession(): Promise<{ deviceCode: string }> {
+  const response = await startDeviceAuth(
+    createAuthorizedRequest('http://localhost/api/client/device/start', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json'
+      },
+      body: JSON.stringify({
+        workspaceId: 'ws_devflow_core'
+      })
+    })
+  );
+  const payload = (await response.json()) as { deviceCode: string };
+
+  await approveDeviceAuth(payload.deviceCode, 'test-user');
+
+  return {
+    deviceCode: payload.deviceCode
+  };
+}
+
 describe('client api routes', () => {
   beforeEach(() => {
-    process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE = 'true';
+    process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE = 'false';
     resetControlPlaneState();
   });
 
@@ -29,14 +69,25 @@ describe('client api routes', () => {
     process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE = originalAutoApprove;
   });
 
-  it('returns workspace bootstrap payload for local clients', async () => {
-    const response = await getBootstrap();
+  it('requires an approved device session before returning workspace bootstrap payloads', async () => {
+    const unauthorizedResponse = await getBootstrap(
+      createAuthorizedRequest('http://localhost/api/client/bootstrap')
+    );
+    const unauthorizedPayload = (await unauthorizedResponse.json()) as { error: string };
+    const approvedSession = await createApprovedDeviceSession();
+    const response = await getBootstrap(
+      createAuthorizedRequest('http://localhost/api/client/bootstrap', {
+        deviceCode: approvedSession.deviceCode
+      })
+    );
     const payload = (await response.json()) as {
       workspace: { slug: string; name: string };
       quotas: { seatLimit: number };
       releaseChannels: string[];
     };
 
+    expect(unauthorizedResponse.status).toBe(401);
+    expect(unauthorizedPayload.error).toContain('Missing device session');
     expect(response.ok).toBe(true);
     expect(payload.workspace.slug).toBe('devflow-core');
     expect(payload.workspace.name).toBe('Devflow Core');
@@ -44,11 +95,20 @@ describe('client api routes', () => {
     expect(payload.releaseChannels).toContain('stable');
   });
 
-  it('returns policies, releases, and history items', async () => {
+  it('returns policies, releases, and history items for approved client sessions', async () => {
+    const approvedSession = await createApprovedDeviceSession();
     const [policiesResponse, releasesResponse, historyResponse] = await Promise.all([
-      getPolicies(),
+      getPolicies(
+        createAuthorizedRequest('http://localhost/api/client/policies', {
+          deviceCode: approvedSession.deviceCode
+        })
+      ),
       getReleases(),
-      getHistory()
+      getHistory(
+        createAuthorizedRequest('http://localhost/api/client/history', {
+          deviceCode: approvedSession.deviceCode
+        })
+      )
     ]);
 
     const policiesPayload = (await policiesResponse.json()) as {
@@ -67,10 +127,12 @@ describe('client api routes', () => {
     expect(historyPayload.items[0]?.traceId).toContain('trace-devflow');
   });
 
-  it('accepts uploaded history and usage events, then exposes the synced item on history reads', async () => {
+  it('accepts uploaded history and usage events for approved sessions, then exposes the synced item on history reads', async () => {
+    const approvedSession = await createApprovedDeviceSession();
     const historyResponse = await postHistory(
-      new Request('http://localhost/api/client/history', {
+      createAuthorizedRequest('http://localhost/api/client/history', {
         method: 'POST',
+        deviceCode: approvedSession.deviceCode,
         body: JSON.stringify({
           id: '',
           traceId: 'trace-test',
@@ -99,8 +161,9 @@ describe('client api routes', () => {
       })
     );
     const usageResponse = await postUsage(
-      new Request('http://localhost/api/client/usage', {
+      createAuthorizedRequest('http://localhost/api/client/usage', {
         method: 'POST',
+        deviceCode: approvedSession.deviceCode,
         body: JSON.stringify({
           source: 'cli',
           event: 'sync.uploaded',
@@ -113,7 +176,11 @@ describe('client api routes', () => {
         }
       })
     );
-    const historyReadResponse = await getHistory();
+    const historyReadResponse = await getHistory(
+      createAuthorizedRequest('http://localhost/api/client/history', {
+        deviceCode: approvedSession.deviceCode
+      })
+    );
 
     const historyPayload = (await historyResponse.json()) as {
       accepted: boolean;
@@ -134,9 +201,9 @@ describe('client api routes', () => {
     expect(historyReadPayload.items[0]?.traceId).toBe('trace-test');
   });
 
-  it('runs the device auth lifecycle across start, poll, and logout routes', async () => {
+  it('runs the explicit device auth lifecycle across start, poll, approval, and logout routes', async () => {
     const deviceResponse = await startDeviceAuth(
-      new Request('http://localhost/api/client/device/start', {
+      createAuthorizedRequest('http://localhost/api/client/device/start', {
         method: 'POST',
         headers: {
           'content-type': 'application/json'
@@ -153,8 +220,25 @@ describe('client api routes', () => {
       status: string;
     };
 
+    const initialPollResponse = await pollDeviceAuth(
+      createAuthorizedRequest('http://localhost/api/client/device/poll', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json'
+        },
+        body: JSON.stringify({
+          deviceCode: devicePayload.deviceCode
+        })
+      })
+    );
+    const initialPollPayload = (await initialPollResponse.json()) as {
+      status: string;
+    };
+
+    await approveDeviceAuth(devicePayload.deviceCode, 'test-user');
+
     const pollResponse = await pollDeviceAuth(
-      new Request('http://localhost/api/client/device/poll', {
+      createAuthorizedRequest('http://localhost/api/client/device/poll', {
         method: 'POST',
         headers: {
           'content-type': 'application/json'
@@ -170,7 +254,7 @@ describe('client api routes', () => {
     };
 
     const logoutResponse = await logoutDeviceAuth(
-      new Request('http://localhost/api/client/device/logout', {
+      createAuthorizedRequest('http://localhost/api/client/device/logout', {
         method: 'POST',
         headers: {
           'content-type': 'application/json'
@@ -186,8 +270,9 @@ describe('client api routes', () => {
     };
 
     expect(devicePayload.userCode).toContain('FLOW-');
-    expect(devicePayload.verificationUri).toContain('/auth/sign-in');
+    expect(devicePayload.verificationUri).toContain('/auth/device');
     expect(devicePayload.status).toBe('pending');
+    expect(initialPollPayload.status).toBe('pending');
     expect(pollPayload.status).toBe('approved');
     expect(pollPayload.workspaceId).toBe('ws_devflow_core');
     expect(logoutPayload.ok).toBe(true);

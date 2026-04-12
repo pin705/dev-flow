@@ -1,0 +1,33 @@
+---
+title: Device Approval and Client Session Hardening
+description: Added a browser approval step for device auth and required approved client sessions for bootstrap, history, policies, and usage APIs.
+section: Changelog
+order: 50
+surfaces:
+  - cli
+  - web
+  - admin
+related:
+  - /docs/getting-started/5-minute-quickstart
+  - /docs/troubleshooting/auth-and-doctor
+  - /docs/cli/reference
+---
+
+# Device Approval and Client Session Hardening
+
+This update closes a major production gap between the CLI and the control plane.
+
+## What changed
+
+- `devflow auth login` now points to a dedicated browser approval page instead of treating sign-in
+  alone as the end of the flow
+- the control plane stores and checks approved device sessions before returning workspace bootstrap,
+  policies, synced history, or accepting usage and review uploads
+- the CLI now sends its approved device session on control-plane requests after login
+- troubleshooting and quickstart docs now reflect the explicit approval step
+
+## Why it matters
+
+- local clients no longer treat bootstrap and sync routes as implicitly trusted after poll alone
+- the browser side of device auth now has a first-class production path
+- CLI, docs, and server routes all describe the same auth behavior

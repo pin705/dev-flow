@@ -1,0 +1,30 @@
+---
+title: Dashboard Workspace Scoping Fix
+description: Fixed control-plane pages so overview, providers, policies, history, and audit load data for the active workspace instead of defaulting silently.
+section: Changelog
+order: 60
+surfaces:
+  - web
+  - admin
+related:
+  - /docs/admin/workspace-setup
+  - /docs/concepts/workspaces-policies-and-governance
+---
+
+# Dashboard Workspace Scoping Fix
+
+This update closes a multi-tenant data bug in the control plane.
+
+## What changed
+
+- dashboard overview now requests stats, providers, policies, and history for the active workspace
+- providers, policies, history, and audit pages now pass the current organization id into the
+  control-plane service
+- tests now cover workspace-scoped page wiring so the dashboard does not silently drift back to
+  default-seed data
+
+## Why it matters
+
+- selecting a different workspace in Clerk now lines up with the data requested by the page
+- the control plane behaves more like a real multi-tenant admin surface instead of a single seeded
+  workspace view

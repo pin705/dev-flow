@@ -5,9 +5,9 @@ import { requireWorkspaceAccess } from '@/features/control-plane/server/access';
 import { listReviewSessions } from '@/features/control-plane/server/service';
 
 export default async function HistoryPage() {
-  await requireWorkspaceAccess();
+  const { orgId } = await requireWorkspaceAccess();
 
-  const reviewSessions = await listReviewSessions();
+  const reviewSessions = await listReviewSessions(orgId);
 
   return (
     <PageContainer

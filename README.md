@@ -39,7 +39,7 @@ Implemented command surface:
 Current status:
 
 - command UX works
-- device auth, bootstrap, history sync, and remote history reads now go through control-plane APIs
+- device auth now includes browser approval, and bootstrap/history sync use approved client sessions
 - local scaffold review works with offline fallback
 - history is stored locally and can sync to the web control plane
 - real Qwen execution is still pending
@@ -174,6 +174,7 @@ What is covered now:
 - review-core request/session logic
 - CLI login/provider/review/history flows
 - control-plane service lifecycle for device auth, synced history, usage, and audit events
+- approved client-session checks for bootstrap, policies, history, and usage routes
 - dashboard access rules for authenticated and workspace-scoped pages
 - Polar route guardrails and billing helpers
 - public docs/install smoke flows
@@ -196,7 +197,6 @@ Key pages:
 This repo now looks like Devflow instead of the original dashboard starter, but a few production-critical systems are still scaffolded:
 
 - real Qwen headless execution
-- browser approval UI for device auth on top of Clerk sessions
 - advanced billing reconciliation beyond the current webhook snapshot updates
 - extension packaging/release flow
 

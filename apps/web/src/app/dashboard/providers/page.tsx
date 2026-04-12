@@ -5,9 +5,9 @@ import { requireWorkspaceAccess } from '@/features/control-plane/server/access';
 import { listProviders } from '@/features/control-plane/server/service';
 
 export default async function ProvidersPage() {
-  await requireWorkspaceAccess();
+  const { orgId } = await requireWorkspaceAccess();
 
-  const providerSummaries = await listProviders();
+  const providerSummaries = await listProviders(orgId);
 
   return (
     <PageContainer

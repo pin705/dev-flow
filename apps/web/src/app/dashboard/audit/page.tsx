@@ -5,9 +5,9 @@ import { requireWorkspaceAccess } from '@/features/control-plane/server/access';
 import { listAuditEvents } from '@/features/control-plane/server/service';
 
 export default async function AuditPage() {
-  await requireWorkspaceAccess();
+  const { orgId } = await requireWorkspaceAccess();
 
-  const auditEvents = await listAuditEvents();
+  const auditEvents = await listAuditEvents(orgId);
 
   return (
     <PageContainer

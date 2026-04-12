@@ -12,7 +12,11 @@ const installCards = [
     title: 'CLI',
     description:
       'Use Devflow from the terminal for login, review, explain, tests, history, and doctor.',
-    steps: ['Run `pnpm install`', 'Run `devflow auth login`', 'Run `devflow doctor`']
+    steps: [
+      'Run `pnpm install`',
+      'Run `devflow auth login` and approve the device in your browser',
+      'Run `devflow doctor`'
+    ]
   },
   {
     title: 'VS Code',

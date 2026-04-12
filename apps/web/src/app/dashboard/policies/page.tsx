@@ -5,9 +5,9 @@ import { requireWorkspaceAccess } from '@/features/control-plane/server/access';
 import { listPolicies } from '@/features/control-plane/server/service';
 
 export default async function PoliciesPage() {
-  await requireWorkspaceAccess();
+  const { orgId } = await requireWorkspaceAccess();
 
-  const policyBundles = await listPolicies();
+  const policyBundles = await listPolicies(orgId);
 
   return (
     <PageContainer

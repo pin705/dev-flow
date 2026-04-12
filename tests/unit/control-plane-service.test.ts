@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { getBillingWorkspaceSnapshot } from '../../apps/web/src/features/control-plane/server/service.ts';
 import {
+  approveDeviceAuth,
   applyPolarWebhookPayload,
+  authorizeApprovedDeviceSession,
   ensureControlPlaneSeedData,
+  getDeviceAuthSession,
   getOverviewStats,
   getWorkspaceBootstrap,
   listAuditEvents,
@@ -101,6 +104,24 @@ describe('control plane service', () => {
     expect(started.status).toBe('pending');
     expect(approved?.status).toBe('approved');
     expect(revoked?.status).toBe('revoked');
+  });
+
+  it('supports explicit device approval and client-session authorization when auto-approve is disabled', async () => {
+    process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE = 'false';
+
+    const started = await startDeviceAuth('ws_devflow_core');
+    const pending = await getDeviceAuthSession(started.deviceCode);
+    const beforeApproval = await authorizeApprovedDeviceSession(started.deviceCode);
+    const approved = await approveDeviceAuth(started.deviceCode, 'test-user');
+    const afterApproval = await authorizeApprovedDeviceSession(started.deviceCode);
+
+    expect(pending?.status).toBe('pending');
+    expect(beforeApproval).toBeNull();
+    expect(approved?.status).toBe('approved');
+    expect(afterApproval).toEqual({
+      deviceCode: started.deviceCode,
+      workspaceId: 'ws_devflow_core'
+    });
   });
 
   it('applies Polar webhook payloads to billing state and audit history', async () => {

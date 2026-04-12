@@ -1091,13 +1091,16 @@ async function recordReviewSessionPersistent(
     }
   });
 
-  return mapReviewSessionFromRow(row);
+  return mapReviewSessionFromRow(row, getExternalWorkspaceId(workspaceRow));
 }
 
-function mapMemoryBootstrap(): WorkspaceBootstrap {
+function mapMemoryBootstrap(workspaceId?: string): WorkspaceBootstrap {
   const state = getState();
   return {
-    workspace: clone(state.workspace),
+    workspace: {
+      ...clone(state.workspace),
+      id: workspaceId ?? state.workspace.id
+    },
     role: state.role,
     policy: clone(state.policies[0]),
     provider: clone(state.providers[0]),
@@ -1119,22 +1122,26 @@ export async function ensureControlPlaneSeedData(workspaceId?: string): Promise<
   );
 }
 
-export async function getWorkspaceBootstrap(): Promise<WorkspaceBootstrap> {
+export async function getWorkspaceBootstrap(workspaceId?: string): Promise<WorkspaceBootstrap> {
   return withPersistence(
-    () => mapMemoryBootstrap(),
+    () => mapMemoryBootstrap(workspaceId),
     async (db) => {
-      const workspaceRow = await getWorkspaceRow(db);
+      const workspaceRow = await getWorkspaceRow(db, workspaceId);
       await ensureStaticSeed(db, workspaceRow);
+      const externalWorkspaceId = getExternalWorkspaceId(workspaceRow);
       const [providers, policies, releases, billing] = await Promise.all([
-        listProvidersPersistent(db),
-        listPoliciesPersistent(db),
+        listProvidersPersistent(db, externalWorkspaceId),
+        listPoliciesPersistent(db, externalWorkspaceId),
         listReleaseManifestsPersistent(db),
-        getBillingSnapshotPersistent(db)
+        getBillingSnapshotPersistent(db, {
+          workspaceId: externalWorkspaceId,
+          workspaceName: workspaceRow.name
+        })
       ]);
 
       return {
         workspace: {
-          id: workspaceSeed.id,
+          id: externalWorkspaceId,
           slug: workspaceRow.slug,
           name: workspaceRow.name
         },
@@ -1159,31 +1166,31 @@ export async function getWorkspaceBootstrap(): Promise<WorkspaceBootstrap> {
   );
 }
 
-export async function listProviders(): Promise<ProviderConfigSummary[]> {
+export async function listProviders(workspaceId?: string): Promise<ProviderConfigSummary[]> {
   return withPersistence(
     () => clone(getState().providers),
-    async (db) => listProvidersPersistent(db)
+    async (db) => listProvidersPersistent(db, workspaceId)
   );
 }
 
-export async function listPolicies(): Promise<PolicyBundle[]> {
+export async function listPolicies(workspaceId?: string): Promise<PolicyBundle[]> {
   return withPersistence(
     () => clone(getState().policies),
-    async (db) => listPoliciesPersistent(db)
+    async (db) => listPoliciesPersistent(db, workspaceId)
   );
 }
 
-export async function listReviewSessions(): Promise<ReviewSession[]> {
+export async function listReviewSessions(workspaceId?: string): Promise<ReviewSession[]> {
   return withPersistence(
     () => clone(getState().reviews),
-    async (db) => listReviewSessionsPersistent(db)
+    async (db) => listReviewSessionsPersistent(db, workspaceId)
   );
 }
 
-export async function listAuditEvents(): Promise<AuditEventRecord[]> {
+export async function listAuditEvents(workspaceId?: string): Promise<AuditEventRecord[]> {
   return withPersistence(
     () => clone(getState().auditEvents),
-    async (db) => listAuditEventsPersistent(db)
+    async (db) => listAuditEventsPersistent(db, workspaceId)
   );
 }
 
@@ -1194,18 +1201,24 @@ export async function listReleaseManifests(): Promise<ReleaseManifest[]> {
   );
 }
 
-export async function listUsageEvents(): Promise<UsageEvent[]> {
+export async function listUsageEvents(workspaceId?: string): Promise<UsageEvent[]> {
   return withPersistence(
     () => clone(getState().usageEvents),
-    async (db) => listUsageEventsPersistent(db)
+    async (db) => listUsageEventsPersistent(db, workspaceId)
   );
 }
 
-export async function getOverviewStats(): Promise<OverviewStat[]> {
+export async function getOverviewStats(workspaceId?: string): Promise<OverviewStat[]> {
   const [reviews, policies, billing] = await Promise.all([
-    listReviewSessions(),
-    listPolicies(),
-    getBillingWorkspaceSnapshot()
+    listReviewSessions(workspaceId),
+    listPolicies(workspaceId),
+    getBillingWorkspaceSnapshot(
+      workspaceId
+        ? {
+            workspaceId
+          }
+        : undefined
+    )
   ]);
 
   return buildOverviewStats(reviews, policies, billing);
@@ -1296,6 +1309,184 @@ export async function recordUsageEvent(
   );
 }
 
+export async function getDeviceAuthSession(deviceCode: string): Promise<DeviceAuthSession | null> {
+  return withPersistence(
+    () => {
+      const state = getState();
+      const session = state.deviceSessions.find((item) => item.deviceCode === deviceCode);
+
+      if (!session) {
+        return null;
+      }
+
+      if (session.status === 'pending' && new Date(session.expiresAt).getTime() <= Date.now()) {
+        session.status = 'expired';
+      }
+
+      return toPublicDeviceSession(session);
+    },
+    async (db) => {
+      const [row] = await db
+        .select()
+        .from(deviceAuthSessions)
+        .where(eq(deviceAuthSessions.deviceCode, deviceCode))
+        .limit(1);
+
+      if (!row) {
+        return null;
+      }
+
+      if (row.status === 'pending' && row.expiresAt.getTime() <= Date.now()) {
+        const [expired] = await db
+          .update(deviceAuthSessions)
+          .set({
+            status: 'expired',
+            updatedAt: new Date()
+          })
+          .where(eq(deviceAuthSessions.id, row.id))
+          .returning();
+
+        return mapDeviceSessionFromRow(db, expired);
+      }
+
+      return mapDeviceSessionFromRow(db, row);
+    }
+  );
+}
+
+export async function approveDeviceAuth(
+  deviceCode: string,
+  actorId = 'Devflow Browser Approval'
+): Promise<DeviceAuthSession | null> {
+  return withPersistence(
+    () => {
+      const state = getState();
+      const session = state.deviceSessions.find((item) => item.deviceCode === deviceCode);
+
+      if (!session) {
+        return null;
+      }
+
+      if (session.status === 'pending' && new Date(session.expiresAt).getTime() <= Date.now()) {
+        session.status = 'expired';
+        return toPublicDeviceSession(session);
+      }
+
+      if (session.status !== 'pending') {
+        return toPublicDeviceSession(session);
+      }
+
+      session.status = 'approved';
+      state.usageEvents = [
+        {
+          id: `usage-${randomUUID()}`,
+          workspaceId: session.workspaceId ?? state.workspace.id,
+          actorId,
+          source: 'cli',
+          event: 'auth.login',
+          metadata: {
+            deviceCode: session.deviceCode
+          },
+          createdAt: new Date().toISOString()
+        },
+        ...state.usageEvents
+      ];
+      state.auditEvents = [
+        createAuditEvent({
+          event: 'device.auth_approved',
+          actor: actorId,
+          target: session.deviceCode,
+          detail: `Approved device auth for workspace ${session.workspaceId ?? state.workspace.id}.`
+        }),
+        ...state.auditEvents
+      ];
+
+      return toPublicDeviceSession(session);
+    },
+    async (db) => {
+      const [row] = await db
+        .select()
+        .from(deviceAuthSessions)
+        .where(eq(deviceAuthSessions.deviceCode, deviceCode))
+        .limit(1);
+
+      if (!row) {
+        return null;
+      }
+
+      if (row.status === 'pending' && row.expiresAt.getTime() <= Date.now()) {
+        const [expired] = await db
+          .update(deviceAuthSessions)
+          .set({
+            status: 'expired',
+            updatedAt: new Date()
+          })
+          .where(eq(deviceAuthSessions.id, row.id))
+          .returning();
+
+        return mapDeviceSessionFromRow(db, expired);
+      }
+
+      if (row.status !== 'pending') {
+        return mapDeviceSessionFromRow(db, row);
+      }
+
+      const [approved] = await db
+        .update(deviceAuthSessions)
+        .set({
+          status: 'approved',
+          updatedAt: new Date()
+        })
+        .where(eq(deviceAuthSessions.id, row.id))
+        .returning();
+
+      const workspaceRow = await getWorkspaceRowByInternalId(db, approved.workspaceId ?? null);
+      const externalWorkspaceId = workspaceRow
+        ? getExternalWorkspaceId(workspaceRow)
+        : workspaceSeed.id;
+
+      await db.insert(usageEventsTable).values({
+        workspaceId: approved.workspaceId ?? (await getWorkspaceRow(db)).id,
+        actorId,
+        source: 'cli',
+        event: 'auth.login',
+        creditsDelta: null,
+        metadata: {
+          deviceCode: approved.deviceCode
+        }
+      });
+
+      await appendAuditEventPersistent(db, externalWorkspaceId, {
+        actorId,
+        event: 'device.auth_approved',
+        targetType: 'device_auth_session',
+        targetId: approved.deviceCode,
+        detail: `Approved device auth for workspace ${externalWorkspaceId}.`,
+        metadata: {
+          targetLabel: approved.deviceCode
+        }
+      });
+
+      return mapDeviceSessionFromRow(db, approved);
+    }
+  );
+}
+
+export async function authorizeApprovedDeviceSession(
+  deviceCode: string
+): Promise<{ deviceCode: string; workspaceId: string } | null> {
+  const session = await getDeviceAuthSession(deviceCode);
+
+  if (!session || session.status !== 'approved') {
+    return null;
+  }
+
+  return {
+    deviceCode: session.deviceCode,
+    workspaceId: session.workspaceId ?? workspaceSeed.id
+  };
+}
+
 export async function startDeviceAuth(workspaceId?: string): Promise<DeviceAuthSession> {
   return withPersistence(
     () => {
@@ -1343,7 +1534,7 @@ export async function startDeviceAuth(workspaceId?: string): Promise<DeviceAuthS
         expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         intervalSeconds: 2,
         status: 'pending',
-        workspaceId: workspaceId ?? workspaceSeed.id
+        workspaceId: workspaceId ?? getExternalWorkspaceId(workspaceRow)
       };
     }
   );
@@ -1369,27 +1560,7 @@ export async function pollDeviceAuth(deviceCode: string): Promise<DeviceAuthSess
       }
 
       if (session.autoApproveOnPoll) {
-        session.status = 'approved';
-        state.usageEvents = [
-          {
-            id: `usage-${randomUUID()}`,
-            workspaceId: session.workspaceId ?? state.workspace.id,
-            source: 'cli',
-            event: 'auth.login',
-            createdAt: new Date().toISOString()
-          },
-          ...state.usageEvents
-        ];
-
-        state.auditEvents = [
-          createAuditEvent({
-            event: 'device.auth_approved',
-            actor: 'Devflow Control Plane',
-            target: session.deviceCode,
-            detail: `Approved device auth for workspace ${session.workspaceId ?? state.workspace.id}.`
-          }),
-          ...state.auditEvents
-        ];
+        return approveDeviceAuth(deviceCode, 'Devflow Control Plane');
       }
 
       return toPublicDeviceSession(session);
@@ -1405,20 +1576,10 @@ export async function pollDeviceAuth(deviceCode: string): Promise<DeviceAuthSess
         return null;
       }
 
-      const workspaceExternalId = workspaceSeed.id;
-      const expiresAt = row.expiresAt.toISOString();
+      const mappedSession = await mapDeviceSessionFromRow(db, row);
 
       if (row.status === 'approved' || row.status === 'revoked') {
-        return {
-          deviceCode: row.deviceCode,
-          userCode: row.userCode,
-          verificationUri: row.verificationUri,
-          verificationUriComplete: row.verificationUriComplete ?? undefined,
-          expiresAt,
-          intervalSeconds: row.intervalSeconds,
-          status: row.status as DeviceAuthSession['status'],
-          workspaceId: workspaceExternalId
-        };
+        return mappedSession;
       }
 
       if (row.expiresAt.getTime() <= Date.now()) {
@@ -1431,72 +1592,14 @@ export async function pollDeviceAuth(deviceCode: string): Promise<DeviceAuthSess
           .where(eq(deviceAuthSessions.id, row.id))
           .returning();
 
-        return {
-          deviceCode: expired.deviceCode,
-          userCode: expired.userCode,
-          verificationUri: expired.verificationUri,
-          verificationUriComplete: expired.verificationUriComplete ?? undefined,
-          expiresAt: expired.expiresAt.toISOString(),
-          intervalSeconds: expired.intervalSeconds,
-          status: 'expired',
-          workspaceId: workspaceExternalId
-        };
+        return mapDeviceSessionFromRow(db, expired);
       }
 
       if (shouldAutoApproveDeviceFlow()) {
-        const [approved] = await db
-          .update(deviceAuthSessions)
-          .set({
-            status: 'approved',
-            updatedAt: new Date()
-          })
-          .where(eq(deviceAuthSessions.id, row.id))
-          .returning();
-
-        await db.insert(usageEventsTable).values({
-          workspaceId: approved.workspaceId ?? (await getWorkspaceRow(db)).id,
-          actorId: null,
-          source: 'cli',
-          event: 'auth.login',
-          creditsDelta: null,
-          metadata: {
-            deviceCode: approved.deviceCode
-          }
-        });
-
-        await appendAuditEventPersistent(db, workspaceExternalId, {
-          actorId: 'Devflow Control Plane',
-          event: 'device.auth_approved',
-          targetType: 'device_auth_session',
-          targetId: approved.deviceCode,
-          detail: `Approved device auth for workspace ${workspaceExternalId}.`,
-          metadata: {
-            targetLabel: approved.deviceCode
-          }
-        });
-
-        return {
-          deviceCode: approved.deviceCode,
-          userCode: approved.userCode,
-          verificationUri: approved.verificationUri,
-          verificationUriComplete: approved.verificationUriComplete ?? undefined,
-          expiresAt: approved.expiresAt.toISOString(),
-          intervalSeconds: approved.intervalSeconds,
-          status: 'approved',
-          workspaceId: workspaceExternalId
-        };
+        return approveDeviceAuth(deviceCode, 'Devflow Control Plane');
       }
 
-      return {
-        deviceCode: row.deviceCode,
-        userCode: row.userCode,
-        verificationUri: row.verificationUri,
-        verificationUriComplete: row.verificationUriComplete ?? undefined,
-        expiresAt,
-        intervalSeconds: row.intervalSeconds,
-        status: 'pending',
-        workspaceId: workspaceExternalId
-      };
+      return mappedSession;
     }
   );
 }
@@ -1538,27 +1641,23 @@ export async function revokeDeviceAuth(deviceCode: string): Promise<DeviceAuthSe
         return null;
       }
 
-      await appendAuditEventPersistent(db, workspaceSeed.id, {
+      const workspaceRow = await getWorkspaceRowByInternalId(db, revoked.workspaceId ?? null);
+      const externalWorkspaceId = workspaceRow
+        ? getExternalWorkspaceId(workspaceRow)
+        : workspaceSeed.id;
+
+      await appendAuditEventPersistent(db, externalWorkspaceId, {
         actorId: 'Devflow Control Plane',
         event: 'device.auth_revoked',
         targetType: 'device_auth_session',
         targetId: revoked.deviceCode,
-        detail: `Revoked device auth for workspace ${workspaceSeed.id}.`,
+        detail: `Revoked device auth for workspace ${externalWorkspaceId}.`,
         metadata: {
           targetLabel: revoked.deviceCode
         }
       });
 
-      return {
-        deviceCode: revoked.deviceCode,
-        userCode: revoked.userCode,
-        verificationUri: revoked.verificationUri,
-        verificationUriComplete: revoked.verificationUriComplete ?? undefined,
-        expiresAt: revoked.expiresAt.toISOString(),
-        intervalSeconds: revoked.intervalSeconds,
-        status: 'revoked',
-        workspaceId: workspaceSeed.id
-      };
+      return mapDeviceSessionFromRow(db, revoked);
     }
   );
 }

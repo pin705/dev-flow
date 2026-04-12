@@ -118,12 +118,30 @@ async function createControlPlaneServer(): Promise<{
   state: {
     history: Array<{ traceId: string }>;
     usageEvents: Array<{ event: string }>;
+    authorizedPaths: string[];
   };
 }> {
   const state = {
     history: [] as Array<{ traceId: string }>,
-    usageEvents: [] as Array<{ event: string }>
+    usageEvents: [] as Array<{ event: string }>,
+    authorizedPaths: [] as string[]
   };
+
+  function requireApprovedDeviceSession(
+    request: IncomingMessage,
+    response: ServerResponse
+  ): boolean {
+    const authorization = request.headers.authorization;
+
+    if (authorization !== 'Bearer device_test_remote') {
+      response.statusCode = 403;
+      response.end(JSON.stringify({ error: 'Device session is not approved.' }));
+      return false;
+    }
+
+    state.authorizedPaths.push(request.url ?? '/');
+    return true;
+  }
 
   const server = createServer(async (request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url ?? '/', 'http://127.0.0.1');
@@ -136,8 +154,8 @@ async function createControlPlaneServer(): Promise<{
         JSON.stringify({
           deviceCode: 'device_test_remote',
           userCode: 'FLOW-9001',
-          verificationUri: 'http://127.0.0.1/auth/sign-in',
-          verificationUriComplete: 'http://127.0.0.1/auth/sign-in?device_code=device_test_remote',
+          verificationUri: 'http://127.0.0.1/auth/device',
+          verificationUriComplete: 'http://127.0.0.1/auth/device?device_code=device_test_remote',
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           intervalSeconds: 1,
           status: 'pending',
@@ -152,8 +170,8 @@ async function createControlPlaneServer(): Promise<{
         JSON.stringify({
           deviceCode: 'device_test_remote',
           userCode: 'FLOW-9001',
-          verificationUri: 'http://127.0.0.1/auth/sign-in',
-          verificationUriComplete: 'http://127.0.0.1/auth/sign-in?device_code=device_test_remote',
+          verificationUri: 'http://127.0.0.1/auth/device',
+          verificationUriComplete: 'http://127.0.0.1/auth/device?device_code=device_test_remote',
           expiresAt: new Date(Date.now() + 60_000).toISOString(),
           intervalSeconds: 1,
           status: 'approved',
@@ -176,6 +194,10 @@ async function createControlPlaneServer(): Promise<{
     }
 
     if (request.method === 'GET' && url.pathname === '/api/client/bootstrap') {
+      if (!requireApprovedDeviceSession(request, response)) {
+        return;
+      }
+
       response.end(
         JSON.stringify({
           workspace: {
@@ -224,11 +246,19 @@ async function createControlPlaneServer(): Promise<{
     }
 
     if (request.method === 'GET' && url.pathname === '/api/client/history') {
+      if (!requireApprovedDeviceSession(request, response)) {
+        return;
+      }
+
       response.end(JSON.stringify({ items: state.history }));
       return;
     }
 
     if (request.method === 'POST' && url.pathname === '/api/client/history') {
+      if (!requireApprovedDeviceSession(request, response)) {
+        return;
+      }
+
       const body = (await readBody(request)) as { traceId: string };
       state.history.unshift(body);
       response.end(JSON.stringify({ accepted: true, item: body }));
@@ -236,6 +266,10 @@ async function createControlPlaneServer(): Promise<{
     }
 
     if (request.method === 'POST' && url.pathname === '/api/client/usage') {
+      if (!requireApprovedDeviceSession(request, response)) {
+        return;
+      }
+
       const body = (await readBody(request)) as { event: string };
       state.usageEvents.unshift(body);
       response.end(
@@ -333,11 +367,14 @@ describe('devflow cli remote control plane integration', () => {
     expect(config.workspace.slug).toBe('remote-workspace');
     expect(config.policyVersionId).toBe('policy-remote-v1');
     expect(config.provider).toBe('qwen');
+    expect(controlPlane.state.authorizedPaths).toContain('/api/client/bootstrap');
 
     expect(reviewResult.status).toBe(0);
     expect(reviewResult.stdout).toContain('# Devflow Review');
     expect(controlPlane.state.history).toHaveLength(1);
     expect(controlPlane.state.usageEvents[0]?.event).toBe('sync.uploaded');
+    expect(controlPlane.state.authorizedPaths).toContain('/api/client/history');
+    expect(controlPlane.state.authorizedPaths).toContain('/api/client/usage');
 
     expect(history).toHaveLength(1);
     expect(history[0]?.traceId).toBe(controlPlane.state.history[0]?.traceId);

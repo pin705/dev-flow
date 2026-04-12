@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { once } from 'node:events';
 import { afterEach, describe, expect, it } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 
 const cliBin = fileURLToPath(new URL('../../apps/cli/bin/devflow', import.meta.url));
 const tempDirs: string[] = [];
@@ -65,6 +66,40 @@ function runCli(args: string[], cwd: string, homeDir: string, apiBaseUrl: string
       DEVFLOW_DEVICE_AUTH_TIMEOUT_MS: '2000'
     }
   });
+}
+
+async function runCliAsync(args: string[], cwd: string, homeDir: string, apiBaseUrl: string) {
+  const child = spawn(cliBin, args, {
+    cwd,
+    env: {
+      ...process.env,
+      HOME: homeDir,
+      USERPROFILE: homeDir,
+      DEVFLOW_API_BASE_URL: apiBaseUrl,
+      DEVFLOW_DEVICE_AUTH_TIMEOUT_MS: '2000'
+    },
+    stdio: 'pipe'
+  });
+
+  let stdout = '';
+  let stderr = '';
+
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+  });
+
+  child.stderr.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  const [code, signal] = await once(child, 'exit');
+
+  return {
+    status: code,
+    signal,
+    stdout,
+    stderr
+  };
 }
 
 async function readBody(request: IncomingMessage): Promise<unknown> {
@@ -262,15 +297,30 @@ describe('devflow cli remote control plane integration', () => {
     const homeDir = makeTempDir('devflow-cli-remote-home-');
     const { repoDir, filePath } = createRepoWithChangedFile();
 
-    const loginResult = runCli(['auth', 'login'], repoDir, homeDir, controlPlane.baseUrl);
-    const reviewResult = runCli(
+    const loginResult = await runCliAsync(
+      ['auth', 'login'],
+      repoDir,
+      homeDir,
+      controlPlane.baseUrl
+    );
+    const reviewResult = await runCliAsync(
       ['review', '--files', filePath, '--markdown'],
       repoDir,
       homeDir,
       controlPlane.baseUrl
     );
-    const historyResult = runCli(['history'], repoDir, homeDir, controlPlane.baseUrl);
+    const historyResult = await runCliAsync(['history'], repoDir, homeDir, controlPlane.baseUrl);
     const configPath = path.join(homeDir, '.devflow', 'config.json');
+    const loginFailureMessage = [
+      `status=${loginResult.status}`,
+      `signal=${loginResult.signal}`,
+      `stdout=${loginResult.stdout}`,
+      `stderr=${loginResult.stderr}`
+    ].join('\n');
+
+    expect(loginResult.status, loginFailureMessage).toBe(0);
+    expect(existsSync(configPath), loginFailureMessage).toBe(true);
+
     const config = JSON.parse(readFileSync(configPath, 'utf8')) as {
       workspace: { name: string; slug: string };
       policyVersionId: string;
@@ -278,7 +328,6 @@ describe('devflow cli remote control plane integration', () => {
     };
     const history = JSON.parse(historyResult.stdout) as Array<{ traceId: string }>;
 
-    expect(loginResult.status).toBe(0);
     expect(loginResult.stdout).toContain('FLOW-9001');
     expect(config.workspace.name).toBe('Remote Workspace');
     expect(config.workspace.slug).toBe('remote-workspace');

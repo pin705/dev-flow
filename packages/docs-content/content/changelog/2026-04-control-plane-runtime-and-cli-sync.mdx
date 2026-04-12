@@ -1,0 +1,34 @@
+---
+title: Control Plane Runtime and CLI Sync
+description: Added shared control-plane runtime state, API-backed CLI auth and sync flows, and deeper automated coverage for Devflow production foundations.
+section: Changelog
+slug: changelog/2026-04-control-plane-runtime-and-cli-sync
+order: 4
+surfaces:
+  - cli
+  - web
+  - admin
+version: 0.1.0
+related:
+  - getting-started/5-minute-quickstart
+  - admin/billing-with-polar
+---
+
+# Control Plane Runtime and CLI Sync
+
+The control plane is no longer a set of disconnected stub routes.
+
+## Highlights
+
+- client APIs now share one runtime service for bootstrap, policies, history, usage, audit, billing state, and device auth lifecycle
+- dashboard overview, providers, policies, history, audit, and billing pages now read from the shared control-plane service instead of importing hard-coded page-local data
+- `devflow auth login` now performs device-start, poll, and bootstrap requests against the control plane, then stores workspace, provider, policy, and sync defaults locally
+- `devflow review` can sync review history and usage metadata back to the control plane while keeping offline fallback intact
+- `devflow history` prefers remote synced history when available and falls back to local history when offline
+- test coverage now includes control-plane service lifecycle, client API mutations, Polar route guardrails, and a mocked remote control-plane integration test for the CLI
+
+## Still Pending
+
+- browser approval UI for device auth wired to Clerk session state
+- real Qwen headless execution in the review runtime
+- persistent DB-backed storage and billing webhook reconciliation

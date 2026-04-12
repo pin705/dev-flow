@@ -39,9 +39,10 @@ Implemented command surface:
 Current status:
 
 - command UX works
-- local scaffold review works
-- history is stored locally
-- real device flow and real Qwen execution are still pending
+- device auth, bootstrap, history sync, and remote history reads now go through control-plane APIs
+- local scaffold review works with offline fallback
+- history is stored locally and can sync to the web control plane
+- real Qwen execution is still pending
 
 ### VS Code extension
 
@@ -107,7 +108,7 @@ Important:
 
 - auth and workspace management still use Clerk
 - billing and subscriptions use Polar
-- workspace billing persistence is still scaffold-level, not yet backed by a real billing table/service implementation
+- billing state is wired into the shared control-plane service, but webhook reconciliation and DB persistence are still pending
 
 ## Getting started
 
@@ -160,6 +161,8 @@ What is covered now:
 - docs-content loaders and navigation
 - review-core request/session logic
 - CLI login/provider/review/history flows
+- control-plane service lifecycle for device auth, synced history, usage, and audit events
+- Polar route guardrails and billing helpers
 - public docs/install smoke flows
 - client bootstrap API smoke
 
@@ -180,7 +183,7 @@ Key pages:
 This repo now looks like Devflow instead of the original dashboard starter, but a few production-critical systems are still scaffolded:
 
 - real DB persistence for client APIs
-- real device auth flow
+- browser approval UI for device auth on top of Clerk sessions
 - real Qwen headless execution
 - billing webhook persistence and reconciliation
 - extension packaging/release flow

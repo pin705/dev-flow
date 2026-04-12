@@ -18,19 +18,19 @@ export default function FormCardSkeleton() {
 
           {/* Grid layout for form fields */}
           <div className='grid grid-cols-1 gap-6 md:grid-cols-2'>
-            {/* Product Name field */}
+            {/* Primary text field */}
             <div className='space-y-2'>
               <Skeleton className='h-4 w-24' /> {/* Label */}
               <Skeleton className='h-10 w-full' /> {/* Input */}
             </div>
 
-            {/* Category field */}
+            {/* Select field */}
             <div className='space-y-2'>
               <Skeleton className='h-4 w-20' /> {/* Label */}
               <Skeleton className='h-10 w-full' /> {/* Select */}
             </div>
 
-            {/* Price field */}
+            {/* Numeric field */}
             <div className='space-y-2'>
               <Skeleton className='h-4 w-16' /> {/* Label */}
               <Skeleton className='h-10 w-full' /> {/* Input */}

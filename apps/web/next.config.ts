@@ -23,7 +23,13 @@ const baseConfig: NextConfig = {
       }
     ]
   },
-  transpilePackages: ['geist'],
+  transpilePackages: [
+    'geist',
+    '@devflow/contracts',
+    '@devflow/docs-content',
+    '@devflow/policy-engine',
+    '@devflow/review-core'
+  ],
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
   }

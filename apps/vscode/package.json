@@ -1,0 +1,93 @@
+{
+  "name": "devflow-vscode",
+  "displayName": "Devflow",
+  "version": "0.1.0",
+  "private": true,
+  "categories": [
+    "Other"
+  ],
+  "main": "./dist/extension.js",
+  "scripts": {
+    "build": "tsc -p .",
+    "watch": "tsc -w -p ."
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "@types/vscode": "^1.95.0",
+    "typescript": "5.7.2"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "devflow.reviewCurrentChanges",
+        "title": "Devflow: Review Current Changes"
+      },
+      {
+        "command": "devflow.reviewStagedChanges",
+        "title": "Devflow: Review Staged Changes"
+      },
+      {
+        "command": "devflow.reviewSelectedFiles",
+        "title": "Devflow: Review Selected Files"
+      },
+      {
+        "command": "devflow.explainCurrentFile",
+        "title": "Devflow: Explain Current File"
+      },
+      {
+        "command": "devflow.generateTests",
+        "title": "Devflow: Generate Tests for Current File"
+      },
+      {
+        "command": "devflow.openHistory",
+        "title": "Devflow: Open Review History"
+      },
+      {
+        "command": "devflow.openTeamRules",
+        "title": "Devflow: Open Team Rules"
+      },
+      {
+        "command": "devflow.signIn",
+        "title": "Devflow: Sign In / Switch Workspace"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "devflow",
+          "title": "Devflow",
+          "icon": "media/devflow.svg"
+        }
+      ]
+    },
+    "views": {
+      "devflow": [
+        {
+          "id": "devflow.results",
+          "name": "Review Results"
+        },
+        {
+          "id": "devflow.history",
+          "name": "History"
+        },
+        {
+          "id": "devflow.workspace",
+          "name": "Workspace"
+        }
+      ]
+    }
+  },
+  "activationEvents": [
+    "onCommand:devflow.explainCurrentFile",
+    "onCommand:devflow.generateTests",
+    "onCommand:devflow.openHistory",
+    "onCommand:devflow.openTeamRules",
+    "onCommand:devflow.reviewCurrentChanges",
+    "onCommand:devflow.reviewSelectedFiles",
+    "onCommand:devflow.reviewStagedChanges",
+    "onCommand:devflow.signIn"
+  ],
+  "engines": {
+    "vscode": "^1.95.0"
+  }
+}

@@ -1,0 +1,35 @@
+---
+title: Local-First Review
+description: Understand the default review posture and why Devflow keeps source context on the developer machine.
+section: Concepts
+order: 10
+surfaces:
+  - cli
+  - vscode
+  - web
+related:
+  - /docs/concepts/architecture
+  - /docs/security/privacy-and-redaction
+---
+
+# Local-First Review
+
+Devflow reads git diffs and local files on the developer machine. The main workflow does not upload the full repository to the cloud.
+
+## What stays local
+
+- Git diff generation
+- File reads
+- Headless review execution
+- Policy injection before review
+- Terminal rendering
+
+## What may sync
+
+- Review metadata
+- Severity counts
+- Selected report artifacts
+- Provider and model metadata
+- Trace IDs for audit
+
+See [Privacy and redaction](/docs/security/privacy-and-redaction) for sync controls and default safeguards.

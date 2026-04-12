@@ -1,0 +1,39 @@
+---
+title: Auth and Doctor Troubleshooting
+description: Diagnose login issues, empty diffs, and local runtime setup problems.
+section: Troubleshooting
+order: 10
+surfaces:
+  - cli
+  - vscode
+  - admin
+related:
+  - /docs/getting-started/5-minute-quickstart
+  - /docs/cli/reference
+---
+
+# Auth and Doctor Troubleshooting
+
+## Common checks
+
+```bash
+devflow auth login
+devflow doctor
+devflow review --staged
+```
+
+## If login fails
+
+- confirm the browser completed device auth
+- confirm the workspace was selected
+- confirm the control plane URL is correct
+
+## If the review is empty
+
+- make sure you have local changes
+- rerun with `--staged` if changes were staged
+- rerun with `--base origin/main` for branch compare
+
+## If Qwen is missing
+
+`devflow doctor` should report a warning and keep the CLI in scaffold mode until Qwen Code is installed.

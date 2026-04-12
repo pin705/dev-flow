@@ -16,15 +16,15 @@ import {
 
 // Default/fallback data when no content is set
 const defaultData = {
-  title: 'Documentation',
+  title: 'Devflow Docs',
   sections: [
     {
       title: 'Getting Started',
-      description: 'Learn how to get started with this application.',
+      description: 'Start with the quickstart or jump into the docs center for workspace guidance.',
       links: [
         {
-          title: 'Installation Guide',
-          url: '#'
+          title: '5-Minute Quickstart',
+          url: '/docs/getting-started/5-minute-quickstart'
         }
       ]
     }
@@ -68,15 +68,25 @@ export function InfoSidebar({ ...props }: React.ComponentProps<typeof Infobar>) 
                         <ul className='flex flex-col gap-1.5'>
                           {section.links.map((link) => (
                             <li key={link.title}>
-                              <Link
-                                href={link.url}
-                                className='text-primary flex items-center gap-1.5 text-sm underline'
-                                target='_blank'
-                                rel='noopener noreferrer'
-                              >
-                                <span>{link.title}</span>
-                                <Icons.chevronRight className='h-3 w-3' />
-                              </Link>
+                              {/^https?:\/\//.test(link.url) ? (
+                                <Link
+                                  href={link.url}
+                                  className='text-primary flex items-center gap-1.5 text-sm underline'
+                                  target='_blank'
+                                  rel='noopener noreferrer'
+                                >
+                                  <span>{link.title}</span>
+                                  <Icons.chevronRight className='h-3 w-3' />
+                                </Link>
+                              ) : (
+                                <Link
+                                  href={link.url}
+                                  className='text-primary flex items-center gap-1.5 text-sm underline'
+                                >
+                                  <span>{link.title}</span>
+                                  <Icons.chevronRight className='h-3 w-3' />
+                                </Link>
+                              )}
                             </li>
                           ))}
                         </ul>

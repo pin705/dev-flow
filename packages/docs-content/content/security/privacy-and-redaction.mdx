@@ -1,0 +1,34 @@
+---
+title: Privacy and Redaction
+description: Local-first review, selective sync, explicit consent, and redaction guardrails.
+section: Security & Privacy
+order: 10
+surfaces:
+  - cli
+  - vscode
+  - web
+  - admin
+related:
+  - /docs/concepts/local-first-review
+  - /docs/admin/provider-strategy
+---
+
+# Privacy and Redaction
+
+## Default posture
+
+- local-first review
+- no full-repo upload by default
+- selected artifact sync only
+- explicit workspace-level cloud sync controls
+
+## Admin controls
+
+- turn cloud sync on or off
+- require redaction before sync
+- restrict allowed providers and models
+- configure retention windows for audit history
+
+## Developer expectations
+
+Always assume policy metadata, trace IDs, and selected findings may sync when cloud history is enabled.

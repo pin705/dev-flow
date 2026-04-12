@@ -1,0 +1,58 @@
+---
+title: CLI Reference
+description: The canonical command surface for Devflow terminal workflows.
+section: CLI Reference
+order: 10
+surfaces:
+  - cli
+related:
+  - /docs/getting-started/install-cli
+  - /docs/troubleshooting/auth-and-doctor
+---
+
+# CLI Reference
+
+## Auth
+
+```bash
+devflow auth login
+devflow auth logout
+```
+
+## Provider configuration
+
+```bash
+devflow config set-provider qwen
+```
+
+## Review workflows
+
+```bash
+devflow review
+devflow review --staged
+devflow review --base origin/main
+devflow review --files src/a.ts src/b.ts
+```
+
+## Explain and tests
+
+```bash
+devflow explain src/lib/review.ts
+devflow tests src/lib/review.ts
+```
+
+## History and diagnostics
+
+```bash
+devflow history
+devflow doctor
+```
+
+## Output modes
+
+Use JSON for scripting and Markdown for artifacts:
+
+```bash
+devflow review --base origin/main --json
+devflow review --base origin/main --markdown
+```

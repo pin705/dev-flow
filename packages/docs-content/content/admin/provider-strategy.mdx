@@ -1,0 +1,27 @@
+---
+title: Provider Strategy
+description: Managed provider, BYOK, model allow-lists, and fallback controls all live in the control plane.
+section: Admin Guide
+order: 20
+surfaces:
+  - admin
+  - web
+related:
+  - /docs/security/privacy-and-redaction
+  - /docs/concepts/qwen-integration
+---
+
+# Provider Strategy
+
+Each workspace should choose one of two provider modes:
+
+- Managed provider by the Devflow platform
+- Bring your own key with explicit model allow-lists
+
+Recommended defaults:
+
+- one primary provider
+- one fallback provider
+- default model pinned per workspace
+- rate limit by workspace
+- secret rotation and audit ownership defined up front

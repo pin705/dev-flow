@@ -1,0 +1,36 @@
+---
+title: Qwen Integration Strategy
+description: Devflow wraps Qwen Code as an opinionated review engine instead of forking it deeply.
+section: Concepts
+order: 40
+surfaces:
+  - cli
+  - vscode
+  - web
+related:
+  - /docs/concepts/architecture
+  - /docs/cli/reference
+---
+
+# Qwen Integration Strategy
+
+Devflow treats Qwen Code as the review engine and builds product value above it.
+
+## Devflow owns
+
+- auth and workspace sync
+- policy injection
+- output parsing
+- history sync
+- audit metadata
+- CLI command UX
+- VS Code panels and actions
+
+## Qwen owns
+
+- headless runtime
+- model execution
+- provider compatibility
+- terminal-first engine behavior
+
+This boundary keeps the product local-first while making governance and team workflows first-class.

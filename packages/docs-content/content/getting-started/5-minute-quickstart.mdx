@@ -1,0 +1,45 @@
+---
+title: 5-Minute Quickstart
+description: Install Devflow, sign in, run the first local-first review, and verify synced history.
+section: Getting Started
+order: 10
+surfaces:
+  - cli
+  - vscode
+  - web
+  - admin
+related:
+  - /docs/getting-started/install-cli
+  - /docs/getting-started/install-vscode-extension
+  - /docs/troubleshooting/auth-and-doctor
+---
+
+# 5-Minute Quickstart
+
+Devflow is a local-first review product. The primary experience lives in the CLI and VS Code extension. The web app exists to manage workspace settings, policies, billing, history, and audit.
+
+## Developer quickstart
+
+1. Install the CLI.
+2. Run `devflow auth login`.
+3. Select your workspace in the browser.
+4. Run a local review against your current branch.
+5. Open synced history in the dashboard.
+
+```bash
+bun install
+devflow auth login
+devflow review --base origin/main
+devflow history
+devflow doctor
+```
+
+## Admin quickstart
+
+1. Create a workspace in the control plane.
+2. Choose a provider strategy.
+3. Publish a policy version.
+4. Invite the team.
+5. Share the CLI and VS Code install docs.
+
+Read [Install the CLI](/docs/getting-started/install-cli) and [Install the VS Code extension](/docs/getting-started/install-vscode-extension) before rollout.

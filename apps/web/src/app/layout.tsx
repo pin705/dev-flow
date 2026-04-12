@@ -16,8 +16,12 @@ const META_THEME_COLORS = {
 };
 
 export const metadata: Metadata = {
-  title: 'Next Shadcn',
-  description: 'Basic dashboard with Next.js and Shadcn'
+  title: {
+    default: 'Devflow',
+    template: '%s | Devflow'
+  },
+  description:
+    'Devflow is a local-first, policy-driven code review platform with CLI and VS Code as the primary experience.'
 };
 
 export const viewport: Viewport = {

@@ -150,9 +150,9 @@ export default function AppSidebar() {
                       Billing
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onClick={() => router.push('/dashboard/notifications')}>
-                    <Icons.notification className='mr-2 h-4 w-4' />
-                    Notifications
+                  <DropdownMenuItem onClick={() => router.push('/dashboard/docs')}>
+                    <Icons.page className='mr-2 h-4 w-4' />
+                    Docs Center
                   </DropdownMenuItem>
                 </DropdownMenuGroup>
                 <DropdownMenuSeparator />

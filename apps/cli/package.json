@@ -1,0 +1,16 @@
+{
+  "name": "@devflow/cli",
+  "version": "0.1.0",
+  "private": true,
+  "bin": {
+    "devflow": "./bin/devflow"
+  },
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx src/index.ts --help"
+  },
+  "dependencies": {
+    "@devflow/contracts": "file:../../packages/contracts",
+    "@devflow/review-core": "file:../../packages/review-core"
+  }
+}

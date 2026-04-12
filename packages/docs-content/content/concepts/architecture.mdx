@@ -1,0 +1,33 @@
+---
+title: Architecture
+description: The production model spans a local runtime, control plane, data APIs, and optional remote jobs.
+section: Concepts
+order: 30
+surfaces:
+  - cli
+  - vscode
+  - web
+  - admin
+related:
+  - /docs/concepts/qwen-integration
+  - /docs/admin/provider-strategy
+---
+
+# Architecture
+
+Devflow ships as three product surfaces with a shared contract layer.
+
+## Surfaces
+
+- CLI for terminal-first review workflows
+- VS Code extension for editor-native UX on top of the CLI
+- Web control plane for account, workspace, provider, billing, docs, history, and audit
+
+## Runtime layers
+
+1. Local runtime on the developer machine
+2. Control plane for auth, billing, settings, and history
+3. Client API for auth exchange, config sync, ingestion, and release channels
+4. Optional remote jobs for future PR and batch workflows
+
+See [Qwen integration](/docs/concepts/qwen-integration) for the review engine boundary.

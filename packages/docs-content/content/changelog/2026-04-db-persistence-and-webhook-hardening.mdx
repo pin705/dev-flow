@@ -1,0 +1,32 @@
+---
+title: DB Persistence and Webhook Hardening
+description: Added persistence-aware control-plane services, webhook-driven billing updates, and production-safe data flow improvements without changing the dashboard visual language.
+section: Changelog
+order: 5
+surfaces:
+  - cli
+  - web
+  - admin
+version: 0.1.0
+related:
+  - admin/billing-with-polar
+  - getting-started/5-minute-quickstart
+  - troubleshooting/auth-and-doctor
+---
+
+# DB Persistence and Webhook Hardening
+
+Devflow now treats the control plane as a persistence-aware application instead of a group of disconnected mock routes.
+
+## Highlights
+
+- control-plane services now use a shared async runtime that can read from Postgres when `DATABASE_URL` is available and fall back to in-memory state for local development and tests
+- workspace bootstrap, provider lists, policies, review history, usage events, audit events, and billing snapshots all share the same service layer
+- `devflow auth login`, review sync, remote history reads, and device auth routes remain local-first but can now work against a real control plane data layer
+- Polar webhook payloads now feed billing state and audit history through the same service layer
+- dashboard pages continue to use the existing theme and component system while reading from the new persistence-aware backend
+
+## Notes
+
+- this release keeps the current visual language intact and focuses on backend hardening rather than UI redesign
+- database-backed persistence is opportunistic: if the database is unavailable, Devflow falls back to the seeded runtime so local development remains smooth

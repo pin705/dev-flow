@@ -1,0 +1,33 @@
+---
+title: Dashboard Access and DB Lifecycle
+description: Added server-side dashboard access guards, restored Clerk proxy coverage, and automated DB migrate/seed flows for local and Docker development.
+section: Changelog
+order: 40
+surfaces:
+  - web
+  - admin
+related:
+  - /docs/getting-started/docker-development
+  - /docs/admin/workspace-setup
+---
+
+# Dashboard Access and DB Lifecycle
+
+This update hardens the control plane without changing the visual theme or introducing new UI
+patterns.
+
+## What changed
+
+- the dashboard layout now enforces authenticated access on the server
+- workspace-scoped pages now redirect to workspace selection when no organization is active
+- Clerk proxy coverage is restored for Next.js 16 route handling
+- Docker development now runs migrations and the idempotent Devflow seed before booting the web app
+- `pnpm db:migrate` and `pnpm db:seed` are available from the repo root
+
+## Why it matters
+
+- server-side guards close a production gap where dashboard routes could rely too heavily on client
+  state
+- local and Docker boot now bring the control plane up in a more deterministic state
+- the control plane stays aligned with the existing dashboard theme instead of adding custom access
+  UIs

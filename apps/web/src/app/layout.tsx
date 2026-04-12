@@ -6,6 +6,7 @@ import ThemeProvider from '@/components/themes/theme-provider';
 import { cn } from '@/lib/utils';
 import type { Metadata, Viewport } from 'next';
 import { cookies } from 'next/headers';
+import Script from 'next/script';
 import NextTopLoader from 'nextjs-toploader';
 import '../styles/globals.css';
 
@@ -35,26 +36,28 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang='en' suppressHydrationWarning data-theme={themeToApply}>
-      <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              try {
-                // Set meta theme color
-                if (localStorage.theme === 'dark' || ((!('theme' in localStorage) || localStorage.theme === 'system') && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '${META_THEME_COLORS.dark}')
-                }
-              } catch (_) {}
-            `
-          }}
-        />
-      </head>
       <body
         className={cn(
           'bg-background overflow-x-hidden overscroll-none font-sans antialiased',
           fontVariables
         )}
       >
+        <Script id='theme-color-sync' strategy='beforeInteractive'>
+          {`
+            try {
+              // Keep the browser UI color aligned with the resolved theme early.
+              if (
+                localStorage.theme === 'dark' ||
+                ((!('theme' in localStorage) || localStorage.theme === 'system') &&
+                  window.matchMedia('(prefers-color-scheme: dark)').matches)
+              ) {
+                document
+                  .querySelector('meta[name="theme-color"]')
+                  ?.setAttribute('content', '${META_THEME_COLORS.dark}');
+              }
+            } catch (_) {}
+          `}
+        </Script>
         <NextTopLoader color='var(--primary)' showSpinner={false} />
         <ThemeProvider
           attribute='class'

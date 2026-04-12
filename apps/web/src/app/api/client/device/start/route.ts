@@ -9,7 +9,7 @@ export async function POST(request: Request) {
     const body = rawBody ? JSON.parse(rawBody) : {};
     const payload = deviceAuthStartSchema.parse(body);
 
-    return NextResponse.json(startDeviceAuth(payload.workspaceId));
+    return NextResponse.json(await startDeviceAuth(payload.workspaceId));
   } catch (error) {
     if (error instanceof ZodError) {
       return NextResponse.json(

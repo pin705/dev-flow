@@ -5,7 +5,7 @@ import { listReviewSessions, recordReviewSession } from '@/features/control-plan
 
 export async function GET() {
   return NextResponse.json({
-    items: listReviewSessions()
+    items: await listReviewSessions()
   });
 }
 
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       accepted: true,
-      item: recordReviewSession(session)
+      item: await recordReviewSession(session)
     });
   } catch (error) {
     if (error instanceof ZodError) {

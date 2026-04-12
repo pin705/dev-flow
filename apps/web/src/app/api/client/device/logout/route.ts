@@ -6,7 +6,7 @@ import { revokeDeviceAuth } from '@/features/control-plane/server/service';
 export async function POST(request: Request) {
   try {
     const body = deviceAuthActionSchema.parse(await request.json());
-    const session = revokeDeviceAuth(body.deviceCode);
+    const session = await revokeDeviceAuth(body.deviceCode);
 
     if (!session) {
       return NextResponse.json(

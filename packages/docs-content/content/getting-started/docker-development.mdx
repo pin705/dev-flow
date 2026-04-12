@@ -28,6 +28,9 @@ This brings up:
 - `web` on `http://localhost:3000`
 - `postgres` on `localhost:5432`
 
+The web container now runs database migrations and the idempotent Devflow seed before starting the
+Next.js dev server, so the control plane is ready on first boot.
+
 Make sure Docker Desktop or your local Docker daemon is running before you start the stack.
 
 ## Why this setup
@@ -44,4 +47,6 @@ pnpm docker:dev:logs
 pnpm docker:dev:down
 pnpm docker:dev:reset
 pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
 ```

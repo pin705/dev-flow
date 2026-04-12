@@ -5,6 +5,8 @@ services:
       dockerfile: Dockerfile.dev
     command: >
       sh -lc "pnpm install --frozen-lockfile &&
+      pnpm db:migrate &&
+      pnpm db:seed &&
       pnpm dev:web"
     environment:
       NODE_ENV: development

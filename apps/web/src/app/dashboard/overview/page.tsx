@@ -1,6 +1,7 @@
 import PageContainer from '@/components/layout/page-container';
 import { overviewInfoContent } from '@/config/infoconfig';
 import { ControlPlaneOverviewPage } from '@/features/control-plane/components/overview-page';
+import { requireWorkspaceAccess } from '@/features/control-plane/server/access';
 import {
   getOverviewStats,
   listPolicies,
@@ -9,6 +10,15 @@ import {
 } from '@/features/control-plane/server/service';
 
 export default async function OverviewPage() {
+  await requireWorkspaceAccess();
+
+  const [overviewStats, policyBundles, providerSummaries, reviewSessions] = await Promise.all([
+    getOverviewStats(),
+    listPolicies(),
+    listProviders(),
+    listReviewSessions()
+  ]);
+
   return (
     <PageContainer
       pageTitle='Workspace Overview'
@@ -16,10 +26,10 @@ export default async function OverviewPage() {
       infoContent={overviewInfoContent}
     >
       <ControlPlaneOverviewPage
-        overviewStats={getOverviewStats()}
-        policyBundles={listPolicies()}
-        providerSummaries={listProviders()}
-        reviewSessions={listReviewSessions()}
+        overviewStats={overviewStats}
+        policyBundles={policyBundles}
+        providerSummaries={providerSummaries}
+        reviewSessions={reviewSessions}
       />
     </PageContainer>
   );

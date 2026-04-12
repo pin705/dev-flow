@@ -6,7 +6,7 @@ import { pollDeviceAuth } from '@/features/control-plane/server/service';
 export async function POST(request: Request) {
   try {
     const body = deviceAuthActionSchema.parse(await request.json());
-    const session = pollDeviceAuth(body.deviceCode);
+    const session = await pollDeviceAuth(body.deviceCode);
 
     if (!session) {
       return NextResponse.json(

@@ -2,7 +2,7 @@ import { Button } from '@/components/ui/button';
 import { Icons } from '@/components/icons';
 import Link from 'next/link';
 
-export default function CtaGithub() {
+export default function DocsShortcut() {
   return (
     <Button variant='ghost' asChild size='sm' className='group hidden sm:flex'>
       <Link

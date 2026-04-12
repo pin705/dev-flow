@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { getBillingWorkspaceSnapshot } from '../../apps/web/src/features/control-plane/server/service.ts';
 import {
+  applyPolarWebhookPayload,
+  ensureControlPlaneSeedData,
   getOverviewStats,
   getWorkspaceBootstrap,
   listAuditEvents,
@@ -29,9 +32,9 @@ describe('control plane service', () => {
     process.env.DEVFLOW_DEVICE_FLOW_AUTO_APPROVE = originalAutoApprove;
   });
 
-  it('returns bootstrap data and derived overview stats from the shared state', () => {
-    const bootstrap = getWorkspaceBootstrap();
-    const stats = getOverviewStats();
+  it('returns bootstrap data and derived overview stats from the shared state', async () => {
+    const bootstrap = await getWorkspaceBootstrap();
+    const stats = await getOverviewStats();
 
     expect(bootstrap.workspace.slug).toBe('devflow-core');
     expect(bootstrap.policy.policyVersionId).toBeTruthy();
@@ -39,12 +42,25 @@ describe('control plane service', () => {
     expect(stats.find((stat) => stat.label === 'Published policies')?.helper).toContain('active');
   });
 
-  it('records synced reviews and appends usage plus audit events', () => {
-    const initialHistorySize = listReviewSessions().length;
-    const initialUsageSize = listUsageEvents().length;
-    const initialAuditSize = listAuditEvents().length;
+  it('keeps seed setup idempotent when control-plane seed is applied more than once', async () => {
+    await ensureControlPlaneSeedData();
+    const firstBootstrap = await getWorkspaceBootstrap();
+    const firstHistorySize = (await listReviewSessions()).length;
 
-    const session = recordReviewSession({
+    await ensureControlPlaneSeedData();
+    const secondBootstrap = await getWorkspaceBootstrap();
+    const secondHistorySize = (await listReviewSessions()).length;
+
+    expect(secondBootstrap.workspace.slug).toBe(firstBootstrap.workspace.slug);
+    expect(secondHistorySize).toBe(firstHistorySize);
+  });
+
+  it('records synced reviews and appends usage plus audit events', async () => {
+    const initialHistorySize = (await listReviewSessions()).length;
+    const initialUsageSize = (await listUsageEvents()).length;
+    const initialAuditSize = (await listAuditEvents()).length;
+
+    const session = await recordReviewSession({
       id: '',
       traceId: 'trace-devflow-new',
       workspaceId: 'ws_devflow_core',
@@ -70,20 +86,51 @@ describe('control plane service', () => {
     });
 
     expect(session.id).toBeTruthy();
-    expect(listReviewSessions()).toHaveLength(initialHistorySize + 1);
-    expect(listReviewSessions()[0]?.traceId).toBe('trace-devflow-new');
-    expect(listUsageEvents()).toHaveLength(initialUsageSize + 1);
-    expect(listAuditEvents()).toHaveLength(initialAuditSize + 1);
-    expect(listAuditEvents()[0]?.event).toBe('review.synced');
+    expect(await listReviewSessions()).toHaveLength(initialHistorySize + 1);
+    expect((await listReviewSessions())[0]?.traceId).toBe('trace-devflow-new');
+    expect(await listUsageEvents()).toHaveLength(initialUsageSize + 1);
+    expect(await listAuditEvents()).toHaveLength(initialAuditSize + 1);
+    expect((await listAuditEvents())[0]?.event).toBe('review.synced');
   });
 
-  it('runs the device auth lifecycle from pending to approved to revoked', () => {
-    const started = startDeviceAuth('ws_devflow_core');
-    const approved = pollDeviceAuth(started.deviceCode);
-    const revoked = revokeDeviceAuth(started.deviceCode);
+  it('runs the device auth lifecycle from pending to approved to revoked', async () => {
+    const started = await startDeviceAuth('ws_devflow_core');
+    const approved = await pollDeviceAuth(started.deviceCode);
+    const revoked = await revokeDeviceAuth(started.deviceCode);
 
     expect(started.status).toBe('pending');
     expect(approved?.status).toBe('approved');
     expect(revoked?.status).toBe('revoked');
+  });
+
+  it('applies Polar webhook payloads to billing state and audit history', async () => {
+    const before = await getBillingWorkspaceSnapshot();
+
+    await applyPolarWebhookPayload({
+      type: 'subscription.updated',
+      data: {
+        id: 'sub_devflow_enterprise',
+        status: 'active',
+        seats: 40,
+        metadata: {
+          workspaceId: 'ws_devflow_core',
+          planKey: 'enterprise'
+        },
+        customer: {
+          id: 'cus_enterprise',
+          externalId: 'ws_devflow_core'
+        }
+      }
+    });
+
+    const after = await getBillingWorkspaceSnapshot();
+    const audit = await listAuditEvents();
+
+    expect(after.customerId).toBe('cus_enterprise');
+    expect(after.planKey).toBe('enterprise');
+    expect(after.subscriptionStatus).toBe('active');
+    expect(after.seatLimit).toBe(40);
+    expect(after.seatLimit).toBeGreaterThanOrEqual(before.seatLimit);
+    expect(audit[0]?.event).toContain('polar.subscription_updated');
   });
 });

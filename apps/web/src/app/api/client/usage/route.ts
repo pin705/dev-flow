@@ -10,7 +10,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({
       accepted: true,
-      event: recordUsageEvent(event)
+      event: await recordUsageEvent(event)
     });
   } catch (error) {
     if (error instanceof ZodError) {

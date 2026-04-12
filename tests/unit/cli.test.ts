@@ -54,7 +54,8 @@ function runCli(args: string[], cwd: string, homeDir: string) {
       ...process.env,
       HOME: homeDir,
       USERPROFILE: homeDir,
-      DEVFLOW_API_BASE_URL: 'http://localhost:3000'
+      DEVFLOW_API_BASE_URL: 'http://127.0.0.1:65535',
+      DEVFLOW_DEVICE_AUTH_TIMEOUT_MS: '500'
     }
   });
 }
@@ -78,7 +79,7 @@ describe('devflow cli', () => {
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Signed in to Devflow.');
-    expect(config.apiBaseUrl).toBe('http://localhost:3000');
+    expect(config.apiBaseUrl).toBe('http://127.0.0.1:65535');
     expect(config.workspace.name).toBe('Local Workspace');
   });
 

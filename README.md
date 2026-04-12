@@ -108,7 +108,8 @@ Important:
 
 - auth and workspace management still use Clerk
 - billing and subscriptions use Polar
-- billing state is wired into the shared control-plane service, but webhook reconciliation and DB persistence are still pending
+- billing state is wired into the shared control-plane service and persisted when `DATABASE_URL` is set
+- Polar webhooks now update the billing snapshot and audit trail; signature validation and richer reconciliation remain to be hardened
 
 ## Getting started
 
@@ -118,6 +119,13 @@ Important:
 pnpm install
 cp apps/web/env.example.txt apps/web/.env.local
 pnpm dev
+```
+
+If you want Postgres-backed control-plane state outside Docker, set `DATABASE_URL` and then run:
+
+```bash
+pnpm db:migrate
+pnpm db:seed
 ```
 
 ### Docker
@@ -133,6 +141,7 @@ The Docker stack starts:
 
 - Next.js web app on `http://localhost:3000`
 - Postgres on `localhost:5432`
+- migrations and seed data before the web server boots
 
 ## Environment
 
@@ -149,6 +158,9 @@ Main groups:
 ## Testing
 
 ```bash
+pnpm db:generate
+pnpm db:migrate
+pnpm db:seed
 pnpm test:unit
 pnpm test:e2e:install
 pnpm test:e2e
@@ -162,6 +174,7 @@ What is covered now:
 - review-core request/session logic
 - CLI login/provider/review/history flows
 - control-plane service lifecycle for device auth, synced history, usage, and audit events
+- dashboard access rules for authenticated and workspace-scoped pages
 - Polar route guardrails and billing helpers
 - public docs/install smoke flows
 - client bootstrap API smoke
@@ -182,10 +195,10 @@ Key pages:
 
 This repo now looks like Devflow instead of the original dashboard starter, but a few production-critical systems are still scaffolded:
 
-- real DB persistence for client APIs
-- browser approval UI for device auth on top of Clerk sessions
 - real Qwen headless execution
-- billing webhook persistence and reconciliation
+- browser approval UI for device auth on top of Clerk sessions
+- advanced billing reconciliation beyond the current webhook snapshot updates
 - extension packaging/release flow
 
-The foundation, cleanup, docs, Docker flow, test harness, and Polar billing direction are in place.
+The foundation, cleanup, docs, Docker flow, persistence-aware control plane, test harness, and
+Polar billing direction are in place.

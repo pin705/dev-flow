@@ -13,6 +13,8 @@
     "start": "pnpm start:web",
     "start:web": "pnpm --dir apps/web start",
     "db:generate": "pnpm --dir apps/web db:generate",
+    "db:migrate": "pnpm --dir apps/web db:migrate",
+    "db:seed": "pnpm --dir apps/web db:seed",
     "db:studio": "pnpm --dir apps/web db:studio",
     "docker:dev": "docker compose up --build",
     "docker:dev:down": "docker compose down --remove-orphans",

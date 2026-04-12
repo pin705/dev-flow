@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Webhooks } from '@polar-sh/nextjs';
+import { applyPolarWebhookPayload } from '@/features/control-plane/server/service';
 import { getPolarConfig } from '@/lib/polar/config';
 
 export const runtime = 'nodejs';
@@ -18,8 +19,8 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   const handler = Webhooks({
     webhookSecret: config.webhookSecret,
-    onPayload: async () => {
-      return;
+    onPayload: async (payload) => {
+      await applyPolarWebhookPayload(payload);
     }
   });
 

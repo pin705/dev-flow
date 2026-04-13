@@ -27,16 +27,16 @@ The web app is the control plane for workspace setup, policy, billing, history, 
 ## What you need
 
 - A local checkout of the repository you want to review
-- `pnpm` available on your machine
+- Node.js 20+ and `npm`
 - Browser access for the one-time sign-in and device approval step
 - A workspace invitation if your team already operates Diffmint centrally
 
 ## 1. Authenticate from the CLI
 
-Install dependencies and start the device login flow:
+Install the CLI and start the device login flow:
 
 ```bash
-pnpm install
+npm install -g @unpijs/dm
 dm auth login
 ```
 

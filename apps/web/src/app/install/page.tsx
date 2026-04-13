@@ -20,7 +20,7 @@ const installCards = [
     description:
       'Use Diffmint from the terminal for login, review, explain, tests, history, and doctor.',
     steps: [
-      { label: 'Install dependencies', command: 'pnpm install' },
+      { label: 'Install the public CLI package', command: 'npm install -g @unpijs/dm' },
       {
         label: 'Sign in and approve the device flow in your browser',
         command: 'dm auth login'
@@ -30,7 +30,8 @@ const installCards = [
   },
   {
     title: 'VS Code',
-    description: 'Install the editor companion after the CLI so it can invoke the local binary.',
+    description:
+      'Install the editor companion. It can reuse the npm CLI or auto-bootstrap a managed one.',
     steps: [
       { label: 'Install the extension' },
       { label: 'Sign in from the extension' },

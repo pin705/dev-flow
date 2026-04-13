@@ -1,0 +1,31 @@
+{
+  "name": "@unpijs/dm",
+  "version": "0.1.0",
+  "description": "Policy-driven local-first code review in the terminal.",
+  "keywords": [
+    "ai",
+    "cli",
+    "code-review",
+    "diffmint",
+    "git"
+  ],
+  "homepage": "https://diffmint.deplio.app",
+  "bugs": {
+    "url": "https://github.com/pin705/diffmint/issues"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pin705/diffmint.git"
+  },
+  "bin": {
+    "dm": "./bin/index.mjs"
+  },
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

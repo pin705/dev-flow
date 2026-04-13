@@ -7,7 +7,9 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "node --import tsx src/index.ts --help"
+    "dev": "node --import tsx src/index.ts --help",
+    "build:npm": "node ./scripts/build-npm-package.mjs",
+    "pack:npm": "pnpm build:npm && cd dist/npm && npm pack"
   },
   "dependencies": {
     "@diffmint/contracts": "workspace:*",

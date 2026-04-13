@@ -160,9 +160,29 @@ Runtime probes:
 
 The Docker dev stack and production image now use the readiness endpoint for health checks.
 
+### Dokploy
+
+Use [docker-compose.dokploy.yml](/home/scpc/Documents/my-workspace/dev-flow/docker-compose.dokploy.yml) for one-shot deployment on Dokploy.
+
+Recommended flow:
+
+```bash
+cp dokploy.env.example .env.dokploy
+docker compose -f docker-compose.dokploy.yml --env-file .env.dokploy config
+```
+
+Then copy the values from [dokploy.env.example](/home/scpc/Documents/my-workspace/dev-flow/dokploy.env.example) into Dokploy environment variables and deploy the compose stack.
+
+What this stack does:
+
+- starts Postgres with a persistent volume
+- runs `pnpm --dir apps/web db:migrate` once before the app boots
+- builds the production web image from `apps/web/Dockerfile`
+- forces persistent control-plane storage in production via `DIFFMINT_REQUIRE_PERSISTENCE=true`
+
 ## Environment
 
-Core variables live in [apps/web/env.example.txt](/Users/bon/Documents/my-workspace/next-shadcn-dashboard-starter/apps/web/env.example.txt).
+Core variables live in [apps/web/env.example.txt](/home/scpc/Documents/my-workspace/dev-flow/apps/web/env.example.txt).
 
 Main groups:
 

@@ -1,0 +1,96 @@
+name: diffmint
+
+x-web-build: &web-build
+  context: .
+  dockerfile: apps/web/Dockerfile
+  args:
+    NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+    NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/auth/sign-in}
+    NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/auth/sign-up}
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL:-/dashboard/overview}
+    NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL:-/dashboard/overview}
+    NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://diffmint.example.com}
+    NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://diffmint.example.com}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-diffmint}
+      POSTGRES_USER: ${POSTGRES_USER:-diffmint}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-diffmint}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-diffmint} -d ${POSTGRES_DB:-diffmint}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    volumes:
+      - diffmint-postgres-data:/var/lib/postgresql/data
+
+  migrate:
+    build:
+      <<: *web-build
+      target: builder
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:-postgres://diffmint:diffmint@postgres:5432/diffmint}
+      DIFFMINT_REQUIRE_PERSISTENCE: "true"
+    command: ["pnpm", "--dir", "apps/web", "db:migrate"]
+
+  web:
+    build:
+      <<: *web-build
+      target: runner
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NEXT_TELEMETRY_DISABLED: "1"
+      DATABASE_URL: ${DATABASE_URL:-postgres://diffmint:diffmint@postgres:5432/diffmint}
+      DIFFMINT_REQUIRE_PERSISTENCE: "true"
+      DIFFMINT_APP_URL: ${DIFFMINT_APP_URL:-https://diffmint.example.com}
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-https://diffmint.example.com}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:-https://diffmint.example.com}
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:-}
+      NEXT_PUBLIC_CLERK_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_SIGN_IN_URL:-/auth/sign-in}
+      NEXT_PUBLIC_CLERK_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_SIGN_UP_URL:-/auth/sign-up}
+      NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL: ${NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL:-/dashboard/overview}
+      NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL: ${NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL:-/dashboard/overview}
+      POLAR_SERVER: ${POLAR_SERVER:-sandbox}
+      POLAR_ACCESS_TOKEN: ${POLAR_ACCESS_TOKEN:-}
+      POLAR_WEBHOOK_SECRET: ${POLAR_WEBHOOK_SECRET:-}
+      POLAR_WEBHOOK_MAX_BYTES: ${POLAR_WEBHOOK_MAX_BYTES:-262144}
+      POLAR_PRODUCT_ID_PRO: ${POLAR_PRODUCT_ID_PRO:-}
+      POLAR_PRODUCT_ID_TEAM: ${POLAR_PRODUCT_ID_TEAM:-}
+      POLAR_PRODUCT_ID_ENTERPRISE: ${POLAR_PRODUCT_ID_ENTERPRISE:-}
+      DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY: ${DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY:-}
+      DIFFMINT_RELEASE_SIGNING_KEY_ID: ${DIFFMINT_RELEASE_SIGNING_KEY_ID:-}
+      DIFFMINT_ENABLE_HSTS: ${DIFFMINT_ENABLE_HSTS:-true}
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/api/health/ready').then((response)=>process.exit(response.ok?0:1)).catch(()=>process.exit(1))\""
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+volumes:
+  diffmint-postgres-data:

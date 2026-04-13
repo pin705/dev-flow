@@ -1,12 +1,19 @@
 import { execFileSync } from 'node:child_process';
-import { getAllDocs, getDocsNavigation, docSections } from '../packages/docs-content/src/index.ts';
+import {
+  getAllDocs,
+  getDocsNavigation,
+  docSections,
+  visibleDocSections
+} from '../packages/docs-content/src/index.ts';
 
 const docs = getAllDocs();
 const hrefs = new Set(docs.map((doc) => doc.href));
 const errors: string[] = [];
 
-for (const section of docSections) {
-  if (!getDocsNavigation().some((group) => group.section === section && group.items.length > 0)) {
+const navigation = getDocsNavigation();
+
+for (const section of visibleDocSections) {
+  if (!navigation.some((group) => group.section === section && group.items.length > 0)) {
     errors.push(`Missing docs for section: ${section}`);
   }
 }

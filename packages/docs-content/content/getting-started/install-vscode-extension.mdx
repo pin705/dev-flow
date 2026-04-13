@@ -1,6 +1,6 @@
 ---
 title: Install the VS Code Extension
-description: Connect the editor companion to the local CLI and make review results feel native in VS Code.
+description: Connect the editor companion to the CLI contract and make review results feel native in VS Code.
 section: Getting Started
 order: 30
 surfaces:
@@ -14,24 +14,26 @@ related:
 
 # Install the VS Code Extension
 
-The VS Code extension is a companion to the CLI. It shells out to the local `dm` binary and keeps
-the review flow inside the editor with native panels, command palette actions, and context-aware
-navigation.
+The VS Code extension keeps the review flow inside the editor with native panels, command palette
+actions, and context-aware navigation. By default it uses `dm` when that binary is already
+available, and falls back to an auto-installed managed CLI when it is not.
 
 ## Before you install
 
-- Install and authenticate the CLI first
-- Make sure the local machine can run `dm doctor` successfully
 - Decide whether the extension should point at production, self-hosted, or a local control plane
+- If your team manages a custom CLI build, know the path you want to pin in `diffmint.cliPath`
 
 ## Setup flow
 
 1. Install the Diffmint VS Code extension.
-2. Confirm the extension can find the local `dm` binary, or set `diffmint.cliPath`.
+2. Run any Diffmint command once. If `dm` is not on PATH and `diffmint.cliPath` is still the default, the extension will install a managed CLI automatically.
 3. Set `diffmint.webBaseUrl` if you are pointing the extension at a self-hosted or local control plane instead of `https://diffmint.io`.
 4. Click **Sign In** in the extension.
 5. Complete browser auth and return to the editor.
 6. Run **Review Current Changes** from the command palette.
+
+If your organization manages the CLI separately, set `diffmint.cliPath` to that binary and the
+extension will use it instead of the managed fallback.
 
 ## What the editor experience should feel like
 

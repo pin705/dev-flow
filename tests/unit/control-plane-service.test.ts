@@ -24,6 +24,7 @@ const originalAutoApprove = process.env.DIFFMINT_DEVICE_FLOW_AUTO_APPROVE;
 const originalDeviceSessionTtl = process.env.DIFFMINT_DEVICE_SESSION_TTL_HOURS;
 const originalForceMemoryState = process.env.DIFFMINT_FORCE_MEMORY_STATE;
 const originalRequirePersistence = process.env.DIFFMINT_REQUIRE_PERSISTENCE;
+const originalNodeEnv = process.env.NODE_ENV;
 
 describe('control plane service', () => {
   beforeEach(() => {
@@ -54,6 +55,12 @@ describe('control plane service', () => {
       delete process.env.DIFFMINT_REQUIRE_PERSISTENCE;
     } else {
       process.env.DIFFMINT_REQUIRE_PERSISTENCE = originalRequirePersistence;
+    }
+
+    if (originalNodeEnv === undefined) {
+      delete process.env.NODE_ENV;
+    } else {
+      process.env.NODE_ENV = originalNodeEnv;
     }
 
     vi.useRealTimers();
@@ -208,6 +215,15 @@ describe('control plane service', () => {
   it('fails fast when persistence is required and the runtime is forced to memory fallback', async () => {
     process.env.DIFFMINT_FORCE_MEMORY_STATE = 'true';
     process.env.DIFFMINT_REQUIRE_PERSISTENCE = 'true';
+
+    await expect(getWorkspaceBootstrap()).rejects.toThrow(
+      'Persistent control-plane storage is required but DATABASE_URL is not active.'
+    );
+  });
+
+  it('fails fast in production when the runtime would otherwise fall back to memory state', async () => {
+    process.env.DIFFMINT_FORCE_MEMORY_STATE = 'true';
+    process.env.NODE_ENV = 'production';
 
     await expect(getWorkspaceBootstrap()).rejects.toThrow(
       'Persistent control-plane storage is required but DATABASE_URL is not active.'

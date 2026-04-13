@@ -20,9 +20,11 @@ import {
   renderReviewSessionHtml,
   renderWorkspaceSummaryHtml
 } from './render';
+import { ensureManagedCliInstalled, type ResolvedCliCommand } from './managed-cli';
 import type { DoctorCheckView, ReviewSessionView } from './types';
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_CLI_PATH = 'dm';
 
 interface LatestResult {
   title: string;
@@ -62,7 +64,9 @@ function getWorkspaceFolder(): string | undefined {
 }
 
 function getCliPath(): string {
-  return vscode.workspace.getConfiguration('diffmint').get<string>('cliPath')?.trim() || 'dm';
+  return (
+    vscode.workspace.getConfiguration('diffmint').get<string>('cliPath')?.trim() || DEFAULT_CLI_PATH
+  );
 }
 
 function getWebBaseUrl(): string {
@@ -71,15 +75,19 @@ function getWebBaseUrl(): string {
   );
 }
 
-async function runCli(args: string[]): Promise<string> {
+async function executeCli(command: ResolvedCliCommand, args: string[]): Promise<string> {
   const cwd = getWorkspaceFolder();
-  const { stdout, stderr } = await execFileAsync(getCliPath(), args, {
-    cwd,
-    env: {
-      ...process.env,
-      DIFFMINT_API_BASE_URL: getWebBaseUrl()
+  const { stdout, stderr } = await execFileAsync(
+    command.executable,
+    [...command.prefixArgs, ...args],
+    {
+      cwd,
+      env: {
+        ...process.env,
+        DIFFMINT_API_BASE_URL: getWebBaseUrl()
+      }
     }
-  });
+  );
   return [stdout, stderr].filter(Boolean).join('\n').trim();
 }
 
@@ -305,7 +313,9 @@ function renderSignInResult(raw: string): RenderedResult {
   };
 }
 
-async function loadReviewHistoryFromCli(): Promise<ReviewSessionView[] | null> {
+async function loadReviewHistoryFromCli(
+  runCli: (args: string[]) => Promise<string>
+): Promise<ReviewSessionView[] | null> {
   const raw = await runCli(['history', '--json']);
   return tryParseJson<ReviewSessionView[]>(raw);
 }
@@ -313,6 +323,7 @@ async function loadReviewHistoryFromCli(): Promise<ReviewSessionView[] | null> {
 async function runAndShow(
   title: string,
   args: string[],
+  runCli: (args: string[]) => Promise<string>,
   latestResultRef: { current: LatestResult | null },
   latestReviewRef: { current: ReviewSessionView | null },
   providers: DiffmintTreeProvider[],
@@ -387,9 +398,82 @@ export function activate(context: vscode.ExtensionContext) {
   const latestReviewRef: { current: ReviewSessionView | null } = {
     current: null
   };
+  const cliCommandRef: { current: ResolvedCliCommand | null } = {
+    current: null
+  };
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   const diagnostics = vscode.languages.createDiagnosticCollection('diffmint');
   statusBar.show();
+
+  async function installManagedCli(options: {
+    forceInstall?: boolean;
+    notify: 'auto' | 'manual' | 'repair';
+  }): Promise<ResolvedCliCommand> {
+    const managedCli = await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Notification,
+        title:
+          options.notify === 'repair'
+            ? 'Diffmint: Repairing bundled CLI'
+            : 'Diffmint: Preparing bundled CLI',
+        cancellable: false
+      },
+      async () =>
+        ensureManagedCliInstalled({
+          extensionPath: context.extensionPath,
+          forceInstall: options.forceInstall
+        })
+    );
+
+    cliCommandRef.current = managedCli;
+
+    if (options.notify === 'auto') {
+      void vscode.window.showInformationMessage(
+        'Diffmint CLI was installed automatically for the VS Code extension.'
+      );
+    } else if (options.notify === 'manual') {
+      void vscode.window.showInformationMessage(
+        'Bundled Diffmint CLI is ready. Reset `diffmint.cliPath` to use the managed runtime.'
+      );
+    } else {
+      void vscode.window.showInformationMessage('Bundled Diffmint CLI was repaired.');
+    }
+
+    return managedCli;
+  }
+
+  async function runCli(args: string[]): Promise<string> {
+    const configuredPath = getCliPath();
+    const configuredCommand: ResolvedCliCommand = {
+      executable: configuredPath,
+      prefixArgs: [],
+      displayPath: configuredPath,
+      source: 'configured'
+    };
+    const command =
+      configuredPath === DEFAULT_CLI_PATH && cliCommandRef.current
+        ? cliCommandRef.current
+        : configuredCommand;
+
+    try {
+      return await executeCli(command, args);
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+      const canAutoInstall =
+        configuredPath === DEFAULT_CLI_PATH &&
+        (nodeError?.code === 'ENOENT' || nodeError?.code === 'EACCES');
+
+      if (!canAutoInstall) {
+        throw error;
+      }
+
+      const managedCli = await installManagedCli({
+        forceInstall: command.source === 'managed',
+        notify: command.source === 'managed' ? 'repair' : 'auto'
+      });
+      return executeCli(managedCli, args);
+    }
+  }
 
   const resultsProvider = new DiffmintTreeProvider(() => {
     if (!latestResultRef.current) {
@@ -496,6 +580,14 @@ export function activate(context: vscode.ExtensionContext) {
       },
       iconPath: new vscode.ThemeIcon('plug')
     }),
+    createItem('Install / Repair CLI', {
+      description: 'Prepare the bundled Diffmint CLI when `dm` is not available locally',
+      command: {
+        command: 'diffmint.installCli',
+        title: 'Install / Repair CLI'
+      },
+      iconPath: new vscode.ThemeIcon('tools')
+    }),
     createItem('Review Current Changes', {
       description: 'Run the default Diffmint review for the current working tree',
       command: {
@@ -556,9 +648,26 @@ export function activate(context: vscode.ExtensionContext) {
 
   const workspaceProvider = new DiffmintTreeProvider(() => {
     const config = readDiffmintConfig(getDiffmintPaths().configPath);
+    const configuredCliPath = getCliPath();
+    const cliItem =
+      configuredCliPath === DEFAULT_CLI_PATH
+        ? cliCommandRef.current?.source === 'managed'
+          ? createItem('CLI: Managed runtime', {
+              description: truncateText(cliCommandRef.current.displayPath, 56),
+              iconPath: new vscode.ThemeIcon('tools')
+            })
+          : createItem('CLI: PATH lookup', {
+              description: DEFAULT_CLI_PATH,
+              iconPath: new vscode.ThemeIcon('terminal')
+            })
+        : createItem('CLI: Custom path', {
+            description: truncateText(configuredCliPath, 56),
+            iconPath: new vscode.ThemeIcon('terminal')
+          });
 
     if (!config?.workspace) {
       return [
+        cliItem,
         createItem('Not signed in', {
           description: 'Run Sign In / Switch Workspace',
           command: {
@@ -573,6 +682,7 @@ export function activate(context: vscode.ExtensionContext) {
     const syncLabel = config.syncDefaults?.cloudSyncEnabled === false ? 'Local-only' : 'Cloud sync';
 
     return [
+      cliItem,
       createItem(config.workspace.name, {
         description: config.workspace.slug,
         command: {
@@ -615,6 +725,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerTreeDataProvider('diffmint.actions', actionsProvider),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (event.affectsConfiguration('diffmint')) {
+        if (event.affectsConfiguration('diffmint.cliPath')) {
+          cliCommandRef.current = null;
+        }
         providers.forEach((provider) => provider.refresh());
         updateStatusBar(statusBar);
       }
@@ -622,10 +735,19 @@ export function activate(context: vscode.ExtensionContext) {
   );
 
   context.subscriptions.push(
+    vscode.commands.registerCommand('diffmint.installCli', async () => {
+      await installManagedCli({
+        forceInstall: true,
+        notify: 'manual'
+      });
+      providers.forEach((provider) => provider.refresh());
+      updateStatusBar(statusBar);
+    }),
     vscode.commands.registerCommand('diffmint.reviewCurrentChanges', async () => {
       await runAndShow(
         'Diffmint Review',
         ['review', '--json'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -641,6 +763,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Review (Staged)',
         ['review', '--staged', '--json'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -665,6 +788,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Review (Selected Files)',
         ['review', '--files', ...targets, '--json'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -685,6 +809,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Explain',
         ['explain', fileName],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -712,6 +837,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Tests',
         ['tests', fileName],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -734,6 +860,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Doctor',
         ['doctor', '--json'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -748,6 +875,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint History',
         ['history', '--json'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,
@@ -775,7 +903,7 @@ export function activate(context: vscode.ExtensionContext) {
             title: 'Diffmint History Search',
             cancellable: false
           },
-          async () => loadReviewHistoryFromCli()
+          async () => loadReviewHistoryFromCli(runCli)
         );
 
         if (!history) {
@@ -824,7 +952,7 @@ export function activate(context: vscode.ExtensionContext) {
             title: 'Diffmint Compare History',
             cancellable: false
           },
-          async () => loadReviewHistoryFromCli()
+          async () => loadReviewHistoryFromCli(runCli)
         );
 
         if (!history || history.length < 2) {
@@ -895,6 +1023,7 @@ export function activate(context: vscode.ExtensionContext) {
       await runAndShow(
         'Diffmint Sign In',
         ['auth', 'login'],
+        runCli,
         latestResultRef,
         latestReviewRef,
         providers,

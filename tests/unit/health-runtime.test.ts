@@ -43,6 +43,20 @@ describe('runtime health', () => {
     );
   });
 
+  it('returns a fail readiness report in production when no database is active', async () => {
+    const report = await getReadinessHealthReport({
+      env: {
+        NODE_ENV: 'production'
+      } as NodeJS.ProcessEnv,
+      docsCountLoader: () => 36
+    });
+
+    expect(report.status).toBe('fail');
+    expect(report.checks.find((check) => check.name === 'database')?.detail).toContain(
+      'Persistent control-plane storage is required'
+    );
+  });
+
   it('returns a fail readiness report when a required subsystem fails', async () => {
     const report = await getReadinessHealthReport({
       env: {

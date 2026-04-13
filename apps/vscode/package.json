@@ -18,17 +18,22 @@
   "main": "./dist/extension.js",
   "scripts": {
     "clean": "rm -rf dist",
-    "build": "tsc -p .",
+    "build": "tsc -p . && node ./scripts/build-embedded-cli.mjs",
     "watch": "tsc -w -p .",
     "package": "pnpm build && pnpm dlx @vscode/vsce package --allow-missing-repository --no-dependencies"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
     "@types/vscode": "^1.95.0",
+    "esbuild": "0.27.7",
     "typescript": "5.7.2"
   },
   "contributes": {
     "commands": [
+      {
+        "command": "diffmint.installCli",
+        "title": "Diffmint: Install / Repair CLI"
+      },
       {
         "command": "diffmint.reviewCurrentChanges",
         "title": "Diffmint: Review Current Changes"
@@ -182,7 +187,7 @@
         "diffmint.cliPath": {
           "type": "string",
           "default": "dm",
-          "description": "Path to the `dm` CLI binary used by the Diffmint extension."
+          "description": "Path to the `dm` CLI binary used by the Diffmint extension. Leave the default to allow automatic fallback to the bundled managed CLI."
         },
         "diffmint.webBaseUrl": {
           "type": "string",
@@ -196,6 +201,7 @@
     "onCommand:diffmint.compareHistory",
     "onCommand:diffmint.explainCurrentFile",
     "onCommand:diffmint.generateTests",
+    "onCommand:diffmint.installCli",
     "onCommand:diffmint.openDashboard",
     "onCommand:diffmint.openFinding",
     "onCommand:diffmint.openHistory",
@@ -209,6 +215,7 @@
     "onCommand:diffmint.showLatestResult",
     "onCommand:diffmint.signIn"
   ],
+  "icon": "media/diffmint-icon.png",
   "engines": {
     "vscode": "^1.95.0"
   }

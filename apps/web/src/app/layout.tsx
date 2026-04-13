@@ -34,7 +34,17 @@ export const metadata: Metadata = {
   },
   manifest: '/manifest.webmanifest',
   icons: {
-    icon: '/icon',
+    icon: [
+      {
+        url: '/favicon.svg',
+        type: 'image/svg+xml'
+      },
+      {
+        url: '/icon',
+        type: 'image/png'
+      }
+    ],
+    shortcut: '/favicon.svg',
     apple: '/apple-icon'
   },
   openGraph: {

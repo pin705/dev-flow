@@ -616,6 +616,25 @@ function getDbClient(): DbClient | null {
   }
 }
 
+function clampWorkspaceField(value: string, maxLength: number): string {
+  return value.length > maxLength ? value.slice(0, maxLength) : value;
+}
+
+function buildScopedWorkspaceSlug(externalWorkspaceId: string): string {
+  const normalized = externalWorkspaceId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  return clampWorkspaceField(`workspace-${normalized || 'default'}`, 191);
+}
+
+function buildScopedWorkspaceName(externalWorkspaceId: string): string {
+  return clampWorkspaceField(`Workspace ${externalWorkspaceId}`, 191);
+}
+
 async function withPersistence<T>(
   memoryFallback: () => T | Promise<T>,
   dbRunner: (db: DbClient) => Promise<T>
@@ -661,6 +680,44 @@ async function getWorkspaceRow(
     if (byOrg) {
       return byOrg;
     }
+
+    const scopedSlug = buildScopedWorkspaceSlug(requestedOrgId);
+    const [byScopedSlug] = await db
+      .select()
+      .from(workspaces)
+      .where(eq(workspaces.slug, scopedSlug))
+      .limit(1);
+
+    if (byScopedSlug) {
+      if (!byScopedSlug.clerkOrganizationId) {
+        const [updated] = await db
+          .update(workspaces)
+          .set({
+            clerkOrganizationId: requestedOrgId,
+            updatedAt: new Date()
+          })
+          .where(eq(workspaces.id, byScopedSlug.id))
+          .returning();
+
+        return updated ?? byScopedSlug;
+      }
+
+      return byScopedSlug;
+    }
+
+    const [inserted] = await db
+      .insert(workspaces)
+      .values({
+        slug: scopedSlug,
+        name: buildScopedWorkspaceName(requestedOrgId),
+        clerkOrganizationId: requestedOrgId,
+        cloudSyncEnabled: workspaceSyncDefaults.cloudSyncEnabled,
+        localOnlyDefault: workspaceSyncDefaults.localOnlyDefault,
+        redactionEnabled: workspaceSyncDefaults.redactionEnabled
+      })
+      .returning();
+
+    return inserted;
   }
 
   const [bySlug] = await db
@@ -670,19 +727,6 @@ async function getWorkspaceRow(
     .limit(1);
 
   if (bySlug) {
-    if (requestedOrgId && !bySlug.clerkOrganizationId) {
-      const [updated] = await db
-        .update(workspaces)
-        .set({
-          clerkOrganizationId: requestedOrgId,
-          updatedAt: new Date()
-        })
-        .where(eq(workspaces.id, bySlug.id))
-        .returning();
-
-      return updated ?? bySlug;
-    }
-
     return bySlug;
   }
 

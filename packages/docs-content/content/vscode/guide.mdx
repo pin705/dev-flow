@@ -18,6 +18,7 @@ The activity bar now starts with a `Quick Actions` section so the most common fl
 away:
 
 - Sign In / Switch Workspace
+- Install / Repair CLI
 - Review Current Changes
 - Review Staged Changes
 - Open Review History
@@ -64,9 +65,10 @@ away:
 
 ## Extension runtime
 
-- The extension shells out to the local `dm` binary instead of embedding a second review engine.
-- `diffmint.cliPath` lets teams pin a custom CLI path when they manage installs outside the system PATH.
+- The extension still shells out to the CLI contract instead of embedding a second review engine, but it now bootstraps a managed CLI automatically when `dm` is not available on the local machine.
+- `diffmint.cliPath` lets teams pin a custom CLI path when they manage installs outside the system PATH. Leaving the setting at the default enables the managed fallback.
 - `diffmint.webBaseUrl` controls where dashboard, team rules, and sign-in links open.
 - The activity-bar views read local Diffmint config and history so workspace and recent review state stay visible without leaving VS Code.
+- Managed installs land under `~/.diffmint/managed-cli/<version>` and can be refreshed from the `Install / Repair CLI` command.
 
 The extension should never become a second review engine. It delegates execution to the local `dm` CLI.

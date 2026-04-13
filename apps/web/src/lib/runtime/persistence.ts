@@ -1,5 +1,5 @@
 export function isPersistenceRequired(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.DIFFMINT_REQUIRE_PERSISTENCE === 'true';
+  return env.DIFFMINT_REQUIRE_PERSISTENCE === 'true' || env.NODE_ENV === 'production';
 }
 
 export function getPersistenceRequirementMessage(): string {

@@ -1,9 +1,12 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import type {
   Finding,
   FindingSeverity,
   PolicyBundle,
+  ReviewConventionMetadata,
   ReviewMode,
   ReviewOutputFormat,
   ReviewRequest,
@@ -12,9 +15,19 @@ import type {
 } from '@diffmint/contracts';
 import { buildPolicyPrompt } from '@diffmint/policy-engine';
 import { buildHeadlessReviewPrompt, buildReviewContextSummary } from './context';
+import {
+  getReviewConventionPath,
+  inspectReviewConvention,
+  resolveReviewConvention
+} from './conventions';
 import { renderMarkdownSession, renderTerminalSession } from './render';
 
 export { renderMarkdownSession, renderTerminalSession } from './render';
+export {
+  getReviewConventionPath,
+  inspectReviewConvention,
+  resolveReviewConvention
+} from './conventions';
 
 export interface BuildReviewRequestOptions {
   cwd: string;
@@ -55,6 +68,11 @@ interface QwenHeadlessResult {
   summary: string;
   durationMs: number;
   rawOutput: string;
+}
+
+interface ParsedDiffFile {
+  firstLine?: number;
+  addedLines: Array<{ line: number; text: string }>;
 }
 
 function run(command: string, args: string[], cwd: string): string {
@@ -121,6 +139,153 @@ export function detectChangedFiles(diff: string): string[] {
   return [...files];
 }
 
+function normalizeReviewFilePath(cwd: string, filePath: string): string {
+  const normalizedPath = filePath.replace(/\\/g, '/');
+
+  if (!path.isAbsolute(normalizedPath)) {
+    return normalizedPath.replace(/^\.\//, '');
+  }
+
+  const relativePath = path.relative(cwd, normalizedPath).replace(/\\/g, '/');
+  return relativePath.startsWith('..') ? normalizedPath : relativePath.replace(/^\.\//, '');
+}
+
+function normalizeReviewFiles(cwd: string, files?: string[]): string[] {
+  if (!files || files.length === 0) {
+    return [];
+  }
+
+  return [...new Set(files.map((file) => normalizeReviewFilePath(cwd, file)))];
+}
+
+function parseDiffFiles(diff: string): Map<string, ParsedDiffFile> {
+  const parsed = new Map<string, ParsedDiffFile>();
+  let currentFile: string | null = null;
+  let currentLine = 0;
+  let inHunk = false;
+
+  for (const line of diff.split('\n')) {
+    const diffMatch = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+
+    if (diffMatch) {
+      currentFile = diffMatch[2];
+      parsed.set(currentFile, {
+        addedLines: []
+      });
+      inHunk = false;
+      continue;
+    }
+
+    if (!currentFile) {
+      continue;
+    }
+
+    const hunkMatch = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunkMatch) {
+      currentLine = Number(hunkMatch[1] ?? '0');
+      inHunk = true;
+      const fileState = parsed.get(currentFile);
+
+      if (fileState && fileState.firstLine === undefined) {
+        fileState.firstLine = currentLine;
+      }
+      continue;
+    }
+
+    if (!inHunk || line.startsWith('+++') || line.startsWith('---')) {
+      continue;
+    }
+
+    if (line.startsWith('+')) {
+      parsed.get(currentFile)?.addedLines.push({
+        line: currentLine,
+        text: line.slice(1)
+      });
+      currentLine += 1;
+      continue;
+    }
+
+    if (line.startsWith('-')) {
+      continue;
+    }
+
+    if (line.startsWith(' ')) {
+      currentLine += 1;
+    }
+  }
+
+  return parsed;
+}
+
+function resolveFindingLine(fileDiff: ParsedDiffFile | undefined): number | undefined {
+  return fileDiff?.addedLines[0]?.line ?? fileDiff?.firstLine;
+}
+
+function buildExcerptFromFile(
+  cwd: string,
+  filePath: string,
+  line: number | undefined,
+  convention: ReviewConventionMetadata | undefined
+): string | undefined {
+  if (!line) {
+    return undefined;
+  }
+
+  const absolutePath = path.isAbsolute(filePath) ? filePath : path.join(cwd, filePath);
+  if (!existsSync(absolutePath)) {
+    return undefined;
+  }
+
+  const contextLines = convention?.snippetContextLines ?? 2;
+  const fileLines = readFileSync(absolutePath, 'utf8').split('\n');
+  const start = Math.max(line - contextLines - 1, 0);
+  const end = Math.min(line + contextLines, fileLines.length);
+  return fileLines.slice(start, end).join('\n').trimEnd() || undefined;
+}
+
+function buildExcerptFromDiff(fileDiff: ParsedDiffFile | undefined): string | undefined {
+  if (!fileDiff || fileDiff.addedLines.length === 0) {
+    return undefined;
+  }
+
+  return fileDiff.addedLines
+    .slice(0, 5)
+    .map((entry) => entry.text)
+    .join('\n')
+    .trimEnd();
+}
+
+function enrichFindingLocation(
+  finding: Finding,
+  request: ReviewRequest,
+  diffFiles: Map<string, ParsedDiffFile>
+): Finding {
+  if (!finding.filePath) {
+    return finding;
+  }
+
+  const normalizedFilePath = normalizeReviewFilePath(request.metadata.cwd, finding.filePath);
+  const fileDiff = diffFiles.get(normalizedFilePath);
+  const line = finding.line ?? resolveFindingLine(fileDiff);
+  const excerpt =
+    finding.excerpt ??
+    buildExcerptFromFile(
+      request.metadata.cwd,
+      normalizedFilePath,
+      line,
+      request.metadata.convention
+    ) ??
+    buildExcerptFromDiff(fileDiff);
+
+  return {
+    ...finding,
+    filePath: normalizedFilePath,
+    line,
+    endLine: finding.endLine ?? line,
+    excerpt
+  };
+}
+
 function countSeverity(findings: Finding[], severity: FindingSeverity): number {
   return findings.filter((item) => item.severity === severity).length;
 }
@@ -169,28 +334,38 @@ function sanitizeArtifactForCloudSync(
   };
 }
 
-function createFinding(
-  severity: FindingSeverity,
-  title: string,
-  summary: string,
-  filePath?: string,
-  suggestedAction?: string
-): Finding {
+function createFinding(options: {
+  severity: FindingSeverity;
+  title: string;
+  summary: string;
+  filePath?: string;
+  line?: number;
+  endLine?: number;
+  excerpt?: string;
+  suggestedAction?: string;
+}): Finding {
   return {
     id: randomUUID(),
-    severity,
-    title,
-    summary,
-    filePath,
-    suggestedAction
+    severity: options.severity,
+    title: options.title,
+    summary: options.summary,
+    filePath: options.filePath,
+    line: options.line,
+    endLine: options.endLine,
+    excerpt: options.excerpt,
+    suggestedAction: options.suggestedAction
   };
 }
 
 export function buildReviewRequest(options: BuildReviewRequestOptions): ReviewRequest {
-  const diff = collectGitDiff(options);
-  const files =
-    options.files && options.files.length > 0 ? options.files : detectChangedFiles(diff);
-  const promptProfile = 'diffmint-codex-compact-v1';
+  const convention = resolveReviewConvention(options.cwd);
+  const normalizedFiles = normalizeReviewFiles(options.cwd, options.files);
+  const diff = collectGitDiff({
+    ...options,
+    files: normalizedFiles
+  });
+  const files = normalizedFiles.length > 0 ? normalizedFiles : detectChangedFiles(diff);
+  const promptProfile = convention.promptProfile;
   const baseRequest = {
     id: randomUUID(),
     traceId: createTraceId(),
@@ -209,7 +384,8 @@ export function buildReviewRequest(options: BuildReviewRequestOptions): ReviewRe
       cwd: options.cwd,
       gitBranch: getCurrentBranch(options.cwd),
       provider: options.provider,
-      model: options.model
+      model: options.model,
+      convention
     },
     createdAt: new Date().toISOString()
   } satisfies ReviewRequest;
@@ -218,7 +394,10 @@ export function buildReviewRequest(options: BuildReviewRequestOptions): ReviewRe
     ...baseRequest,
     metadata: {
       ...baseRequest.metadata,
-      context: buildReviewContextSummary(baseRequest)
+      context: buildReviewContextSummary(baseRequest, {
+        maxVisibleFiles: convention.maxVisibleFiles,
+        maxFileGroups: convention.maxFileGroups
+      })
     }
   };
 }
@@ -364,6 +543,9 @@ function normalizeFindingFromQwen(value: unknown): Finding | null {
     title,
     summary,
     filePath: typeof candidate.filePath === 'string' ? candidate.filePath : undefined,
+    line: typeof candidate.line === 'number' ? candidate.line : undefined,
+    endLine: typeof candidate.endLine === 'number' ? candidate.endLine : undefined,
+    excerpt: typeof candidate.excerpt === 'string' ? candidate.excerpt : undefined,
     suggestedAction:
       typeof candidate.suggestedAction === 'string' ? candidate.suggestedAction : undefined
   };
@@ -464,14 +646,27 @@ function runQwenHeadlessReview(
 
 export function createFindingsFromRequest(request: ReviewRequest): Finding[] {
   const findings: Finding[] = [];
+  const diffFiles = parseDiffFiles(request.diff);
+  const primaryFile = request.files[0];
+  const primaryLine = primaryFile ? resolveFindingLine(diffFiles.get(primaryFile)) : undefined;
+  const primaryExcerpt =
+    primaryFile && primaryLine
+      ? buildExcerptFromFile(
+          request.metadata.cwd,
+          primaryFile,
+          primaryLine,
+          request.metadata.convention
+        )
+      : undefined;
 
   if (!request.diff.trim()) {
     findings.push(
-      createFinding(
-        'low',
-        'No local changes detected',
-        'The requested review scope did not produce a git diff. Confirm the target files, base ref, or staged state before rerunning.'
-      )
+      createFinding({
+        severity: 'low',
+        title: 'No local changes detected',
+        summary:
+          'The requested review scope did not produce a git diff. Confirm the target files, base ref, or staged state before rerunning.'
+      })
     );
     return findings;
   }
@@ -486,25 +681,27 @@ export function createFindingsFromRequest(request: ReviewRequest): Finding[] {
       file.includes('auth')
     ) {
       findings.push(
-        createFinding(
-          'high',
-          'Sensitive control-plane surface changed',
-          `Changes in ${file} affect auth, billing, or API behavior. Run a security-oriented pass and capture verification steps before merge.`,
-          file,
-          'Rerun with `dm review --base origin/main --mode security` and document the verification plan.'
-        )
+        createFinding({
+          severity: 'high',
+          title: 'Sensitive control-plane surface changed',
+          summary: `Changes in ${file} affect auth, billing, or API behavior. Run a security-oriented pass and capture verification steps before merge.`,
+          filePath: file,
+          suggestedAction:
+            'Rerun with `dm review --base origin/main --mode security` and document the verification plan.'
+        })
       );
     }
 
     if (file.includes('policy') || file.includes('docs')) {
       findings.push(
-        createFinding(
-          'medium',
-          'Governance content changed',
-          `Updates in ${file} should stay aligned with the active workspace policy version and release notes.`,
-          file,
-          'Confirm the policy version, changelog entry, and related docs links are updated together.'
-        )
+        createFinding({
+          severity: 'medium',
+          title: 'Governance content changed',
+          summary: `Updates in ${file} should stay aligned with the active workspace policy version and release notes.`,
+          filePath: file,
+          suggestedAction:
+            'Confirm the policy version, changelog entry, and related docs links are updated together.'
+        })
       );
     }
   }
@@ -512,15 +709,20 @@ export function createFindingsFromRequest(request: ReviewRequest): Finding[] {
   const hasTests = files.some((file) => file.includes('test') || file.includes('__tests__'));
   if (!hasTests) {
     findings.push(
-      createFinding(
-        'medium',
-        'No test changes found',
-        'The diff does not appear to include automated test coverage. Confirm whether the change is low-risk or document manual verification.'
-      )
+      createFinding({
+        severity: 'medium',
+        title: 'No test changes found',
+        summary:
+          'The diff does not appear to include automated test coverage. Confirm whether the change is low-risk or document manual verification.',
+        filePath: primaryFile,
+        line: primaryLine,
+        endLine: primaryLine,
+        excerpt: primaryExcerpt
+      })
     );
   }
 
-  return findings;
+  return findings.map((finding) => enrichFindingLocation(finding, request, diffFiles));
 }
 
 export function createReviewSession(request: ReviewRequest): ReviewSession {
@@ -541,6 +743,7 @@ export function createReviewSession(request: ReviewRequest): ReviewSession {
     status: 'completed',
     findings,
     context,
+    convention: request.metadata.convention,
     summary:
       findings.length === 0
         ? 'No obvious issues detected in the selected review scope.'
@@ -582,7 +785,10 @@ export async function createReviewSessionWithRuntime(
     return createReviewSession(request);
   }
 
-  const findings = runtimeResult.findings;
+  const diffFiles = parseDiffFiles(request.diff);
+  const findings = runtimeResult.findings.map((finding) =>
+    enrichFindingLocation(finding, request, diffFiles)
+  );
   const startedAt = new Date().toISOString();
   const completedAt = new Date().toISOString();
   const context = request.metadata.context ?? buildReviewContextSummary(request);
@@ -599,6 +805,7 @@ export async function createReviewSessionWithRuntime(
     status: 'completed',
     findings,
     context,
+    convention: request.metadata.convention,
     summary: runtimeResult.summary,
     severityCounts: {
       low: countSeverity(findings, 'low'),
@@ -650,6 +857,9 @@ export function sanitizeReviewSessionForCloudSync(
       summary: normalizedOptions.redactText
         ? (redactSensitiveText(finding.summary) ?? finding.summary)
         : finding.summary,
+      excerpt: normalizedOptions.redactText
+        ? redactSensitiveText(finding.excerpt)
+        : finding.excerpt,
       suggestedAction: normalizedOptions.redactText
         ? redactSensitiveText(finding.suggestedAction)
         : finding.suggestedAction

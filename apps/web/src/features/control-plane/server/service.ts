@@ -382,6 +382,8 @@ function normalizeReviewSession(input: ReviewSession, workspaceId: string): Revi
     workspaceId: input.workspaceId ?? workspaceId,
     startedAt: input.startedAt ?? new Date().toISOString(),
     findings: input.findings ?? [],
+    context: input.context,
+    convention: input.convention,
     artifacts: input.artifacts ?? []
   };
 }
@@ -477,6 +479,14 @@ function mapReviewSessionFromRow(
     findings: Array.isArray(metadata.findings)
       ? (metadata.findings as ReviewSession['findings'])
       : [],
+    context:
+      metadata.context && typeof metadata.context === 'object'
+        ? (metadata.context as ReviewSession['context'])
+        : undefined,
+    convention:
+      metadata.convention && typeof metadata.convention === 'object'
+        ? (metadata.convention as ReviewSession['convention'])
+        : undefined,
     summary: row.summary,
     severityCounts: row.severityCounts as ReviewSession['severityCounts'],
     durationMs: row.durationMs,
@@ -1265,6 +1275,8 @@ async function recordReviewSessionPersistent(
   await ensureStaticSeed(db, workspaceRow);
   const metadata = {
     findings: normalized.findings,
+    context: normalized.context,
+    convention: normalized.convention,
     artifacts: normalized.artifacts,
     workspaceExternalId: normalized.workspaceId,
     policyVersionId: normalized.policyVersionId

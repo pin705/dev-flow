@@ -117,6 +117,17 @@ export interface ReviewContextSummary {
   diffStats: ReviewDiffStats;
 }
 
+export interface ReviewConventionMetadata {
+  promptProfile: string;
+  source: 'default' | 'workspace-file';
+  filePath?: string;
+  additionalPriorities: string[];
+  reviewNotes: string[];
+  snippetContextLines: number;
+  maxVisibleFiles: number;
+  maxFileGroups: number;
+}
+
 export interface ReviewRequest {
   id: string;
   traceId: string;
@@ -138,6 +149,7 @@ export interface ReviewRequest {
     provider?: string;
     model?: string;
     context?: ReviewContextSummary;
+    convention?: ReviewConventionMetadata;
   };
   createdAt: string;
 }
@@ -149,6 +161,8 @@ export interface Finding {
   summary: string;
   filePath?: string;
   line?: number;
+  endLine?: number;
+  excerpt?: string;
   ruleId?: string;
   suggestedAction?: string;
 }
@@ -175,6 +189,7 @@ export interface ReviewSession {
   status: ReviewSessionStatus;
   findings: Finding[];
   context?: ReviewContextSummary;
+  convention?: ReviewConventionMetadata;
   summary: string;
   severityCounts: Record<FindingSeverity, number>;
   durationMs: number;

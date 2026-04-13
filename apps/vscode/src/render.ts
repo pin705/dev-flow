@@ -39,6 +39,22 @@ function renderCodeBlock(content: string): string {
   )}</code></pre>`;
 }
 
+function formatFindingLocation(finding: ReviewSessionView['findings'][number]): string | null {
+  if (!finding.filePath) {
+    return null;
+  }
+
+  if (finding.line && finding.endLine && finding.endLine !== finding.line) {
+    return `${finding.filePath}:${finding.line}-${finding.endLine}`;
+  }
+
+  if (finding.line) {
+    return `${finding.filePath}:${finding.line}`;
+  }
+
+  return finding.filePath;
+}
+
 function renderHtmlShell(title: string, subtitle: string, sections: string[]): string {
   return `<!doctype html>
 <html>
@@ -129,8 +145,19 @@ export function renderReviewSessionHtml(session: ReviewSessionView): string {
                 ${renderBadge(finding.severity.toUpperCase(), tone)}
                 <strong style="font-size:15px;">${escapeHtml(finding.title)}</strong>
               </div>
-              ${finding.filePath ? `<p style="margin:0 0 8px;color:#334155;"><strong>File:</strong> ${escapeHtml(finding.filePath)}</p>` : ''}
+              ${
+                formatFindingLocation(finding)
+                  ? `<p style="margin:0 0 8px;color:#334155;"><strong>File:</strong> ${escapeHtml(
+                      formatFindingLocation(finding) ?? ''
+                    )}</p>`
+                  : ''
+              }
               <p style="margin:0; color:#334155; line-height:1.6;">${escapeHtml(finding.summary)}</p>
+              ${
+                finding.excerpt
+                  ? `<div style="margin-top:12px;">${renderCodeBlock(finding.excerpt)}</div>`
+                  : ''
+              }
               ${
                 finding.suggestedAction
                   ? `<p style="margin:10px 0 0;color:#0f172a;"><strong>Next:</strong> ${escapeHtml(
@@ -213,6 +240,56 @@ export function renderHistoryHtml(entries: DiffmintHistoryEntry[]): string {
     'Review history from the current Diffmint home directory.',
     'Recent sessions stay grouped by summary, severity, and scope so the list remains scannable.',
     [renderSection('Recent Sessions', cards)]
+  );
+}
+
+export function renderHistoryCompareHtml(
+  left: ReviewSessionView,
+  right: ReviewSessionView
+): string {
+  const leftTitles = new Set(left.findings.map((finding) => finding.title));
+  const rightTitles = new Set(right.findings.map((finding) => finding.title));
+  const leftOnly = left.findings.filter((finding) => !rightTitles.has(finding.title));
+  const rightOnly = right.findings.filter((finding) => !leftTitles.has(finding.title));
+
+  return renderHtmlShell(
+    'Compare two recent review sessions.',
+    'Use this view to confirm whether the latest review tightened scope, reduced severity, or introduced new findings.',
+    [
+      renderSection(
+        'Session A',
+        renderKeyValueRows([
+          { label: 'Trace ID', value: left.traceId },
+          { label: 'Summary', value: left.summary },
+          { label: 'Severity', value: formatSeveritySummary(left) },
+          { label: 'Scope', value: left.context?.fileSummary ?? 'No scope metadata' }
+        ])
+      ),
+      renderSection(
+        'Session B',
+        renderKeyValueRows([
+          { label: 'Trace ID', value: right.traceId },
+          { label: 'Summary', value: right.summary },
+          { label: 'Severity', value: formatSeveritySummary(right) },
+          { label: 'Scope', value: right.context?.fileSummary ?? 'No scope metadata' }
+        ])
+      ),
+      renderSection(
+        'Finding Deltas',
+        renderKeyValueRows([
+          {
+            label: 'Only in A',
+            value:
+              leftOnly.length === 0 ? 'None' : leftOnly.map((finding) => finding.title).join(', ')
+          },
+          {
+            label: 'Only in B',
+            value:
+              rightOnly.length === 0 ? 'None' : rightOnly.map((finding) => finding.title).join(', ')
+          }
+        ])
+      )
+    ]
   );
 }
 

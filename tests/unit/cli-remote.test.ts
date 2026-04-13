@@ -388,7 +388,12 @@ describe('diffmint cli remote control plane integration', () => {
       homeDir,
       controlPlane.baseUrl
     );
-    const historyResult = await runCliAsync(['history'], repoDir, homeDir, controlPlane.baseUrl);
+    const historyResult = await runCliAsync(
+      ['history', '--json'],
+      repoDir,
+      homeDir,
+      controlPlane.baseUrl
+    );
     const configPath = path.join(homeDir, '.diffmint', 'config.json');
     const loginFailureMessage = [
       `status=${loginResult.status}`,
@@ -464,7 +469,12 @@ describe('diffmint cli remote control plane integration', () => {
 
     controlPlane.state.acceptSyncUploads = true;
 
-    const historyResult = await runCliAsync(['history'], repoDir, homeDir, controlPlane.baseUrl);
+    const historyResult = await runCliAsync(
+      ['history', '--json'],
+      repoDir,
+      homeDir,
+      controlPlane.baseUrl
+    );
     const history = JSON.parse(historyResult.stdout) as Array<{ traceId: string }>;
     const remainingQueue = JSON.parse(readFileSync(queuePath, 'utf8')) as unknown[];
 

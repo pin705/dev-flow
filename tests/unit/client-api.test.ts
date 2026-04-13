@@ -213,6 +213,28 @@ describe('client api routes', () => {
           model: 'qwen-code',
           status: 'completed',
           findings: [],
+          context: {
+            sourceLabel: 'Branch Compare',
+            modeLabel: 'full',
+            fileSummary: '1 file in apps/web',
+            visibleFiles: ['apps/web/src/app/api/client/history/route.ts'],
+            remainingFileCount: 0,
+            fileGroups: [{ label: 'apps/web', count: 1 }],
+            diffStats: {
+              fileCount: 1,
+              additions: 2,
+              deletions: 0
+            }
+          },
+          convention: {
+            promptProfile: 'diffmint-codex-compact-v1',
+            source: 'default',
+            additionalPriorities: [],
+            reviewNotes: [],
+            snippetContextLines: 2,
+            maxVisibleFiles: 5,
+            maxFileGroups: 6
+          },
           summary: 'Synced from a unit test.',
           severityCounts: {
             low: 0,
@@ -254,7 +276,11 @@ describe('client api routes', () => {
 
     const historyPayload = (await historyResponse.json()) as {
       accepted: boolean;
-      item: { traceId: string };
+      item: {
+        traceId: string;
+        context?: { fileSummary?: string };
+        convention?: { promptProfile?: string };
+      };
     };
     const usagePayload = (await usageResponse.json()) as {
       accepted: boolean;
@@ -267,6 +293,8 @@ describe('client api routes', () => {
     expect(historyPayload.accepted).toBe(true);
     expect(historyResponse.headers.get('cache-control')).toBe('private, no-store, max-age=0');
     expect(historyPayload.item.traceId).toBe('trace-test');
+    expect(historyPayload.item.context?.fileSummary).toBe('1 file in apps/web');
+    expect(historyPayload.item.convention?.promptProfile).toBe('diffmint-codex-compact-v1');
     expect(usagePayload.accepted).toBe(true);
     expect(usageResponse.headers.get('x-diffmint-request-id')).toMatch(/^req_/);
     expect(usagePayload.event.event).toBe('sync.uploaded');

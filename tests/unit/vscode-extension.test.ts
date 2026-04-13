@@ -12,6 +12,7 @@ import {
   renderResultHtml,
   tryParseJson
 } from '../../apps/vscode/src/diffmint.ts';
+import { renderHistoryCompareHtml, renderReviewSessionHtml } from '../../apps/vscode/src/render.ts';
 
 const tempDirs: string[] = [];
 
@@ -93,5 +94,65 @@ describe('vscode extension helpers', () => {
   it('parses valid json payloads and ignores invalid ones', () => {
     expect(tryParseJson<{ ok: boolean }>('{"ok":true}')).toEqual({ ok: true });
     expect(tryParseJson('{not-json}')).toBeNull();
+  });
+
+  it('renders review and history compare panels with finding excerpts', () => {
+    const session = {
+      id: 'review-1',
+      traceId: 'trace-1',
+      requestId: 'request-1',
+      source: 'selected_files',
+      commandSource: 'cli',
+      provider: 'qwen',
+      model: 'qwen-code',
+      status: 'completed',
+      summary: 'One finding recorded.',
+      severityCounts: {
+        critical: 0,
+        high: 1,
+        medium: 0,
+        low: 0
+      },
+      findings: [
+        {
+          id: 'finding-1',
+          severity: 'high',
+          title: 'Sensitive route changed',
+          summary: 'Route logic now returns different auth state.',
+          filePath: 'apps/web/src/app/api/client/history/route.ts',
+          line: 2,
+          endLine: 2,
+          excerpt: 'export const runtime = "nodejs";'
+        }
+      ],
+      context: {
+        sourceLabel: 'Selected Files',
+        modeLabel: 'full',
+        fileSummary: 'apps/web/src/app/api/client/history/route.ts',
+        visibleFiles: ['apps/web/src/app/api/client/history/route.ts'],
+        remainingFileCount: 0,
+        fileGroups: [{ label: 'apps/web', count: 1 }],
+        diffStats: { fileCount: 1, additions: 2, deletions: 0 }
+      },
+      durationMs: 200,
+      startedAt: new Date().toISOString(),
+      completedAt: new Date().toISOString(),
+      artifacts: []
+    };
+
+    const reviewHtml = renderReviewSessionHtml(session);
+    const compareHtml = renderHistoryCompareHtml(session, {
+      ...session,
+      traceId: 'trace-2',
+      summary: 'Second review',
+      findings: []
+    });
+
+    expect(reviewHtml).toContain('Sensitive route changed');
+    expect(reviewHtml).toContain('route.ts:2');
+    expect(reviewHtml).toContain('nodejs');
+    expect(compareHtml).toContain('Finding Deltas');
+    expect(compareHtml).toContain('trace-1');
+    expect(compareHtml).toContain('trace-2');
   });
 });

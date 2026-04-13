@@ -48,11 +48,49 @@ export const reviewSessionSchema = z.object({
         summary: z.string(),
         filePath: z.string().optional(),
         line: z.number().optional(),
+        endLine: z.number().optional(),
+        excerpt: z.string().optional(),
         ruleId: z.string().optional(),
         suggestedAction: z.string().optional()
       })
     )
     .default([]),
+  context: z
+    .object({
+      sourceLabel: z.string(),
+      modeLabel: z.string(),
+      branch: z.string().optional(),
+      promptProfile: z.string().optional(),
+      fileSummary: z.string(),
+      visibleFiles: z.array(z.string()).default([]),
+      remainingFileCount: z.number().int().nonnegative(),
+      fileGroups: z
+        .array(
+          z.object({
+            label: z.string(),
+            count: z.number().int().nonnegative()
+          })
+        )
+        .default([]),
+      diffStats: z.object({
+        fileCount: z.number().int().nonnegative(),
+        additions: z.number().int().nonnegative(),
+        deletions: z.number().int().nonnegative()
+      })
+    })
+    .optional(),
+  convention: z
+    .object({
+      promptProfile: z.string(),
+      source: z.enum(['default', 'workspace-file']),
+      filePath: z.string().optional(),
+      additionalPriorities: z.array(z.string()).default([]),
+      reviewNotes: z.array(z.string()).default([]),
+      snippetContextLines: z.number().int().positive(),
+      maxVisibleFiles: z.number().int().positive(),
+      maxFileGroups: z.number().int().positive()
+    })
+    .optional(),
   summary: z.string().min(1),
   severityCounts: z.object({
     low: z.number().int().nonnegative(),

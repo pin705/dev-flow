@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   buildWebUrl,
@@ -13,6 +14,7 @@ import {
 } from './diffmint';
 import {
   renderDoctorChecksHtml,
+  renderHistoryCompareHtml,
   renderHistoryHtml,
   renderPlainTextHtml,
   renderReviewSessionHtml,
@@ -32,6 +34,7 @@ interface LatestResult {
 interface RenderedResult {
   body: string;
   html?: string;
+  reviewSession?: ReviewSessionView;
 }
 
 class DiffmintTreeProvider implements vscode.TreeDataProvider<vscode.TreeItem> {
@@ -119,6 +122,104 @@ function truncateText(value: string, maxLength = 84): string {
   return `${normalized.slice(0, maxLength - 1)}…`;
 }
 
+function resolveFindingUri(filePath: string): vscode.Uri | null {
+  if (path.isAbsolute(filePath)) {
+    return vscode.Uri.file(filePath);
+  }
+
+  const workspaceFolder = getWorkspaceFolder();
+  if (!workspaceFolder) {
+    return null;
+  }
+
+  return vscode.Uri.file(path.join(workspaceFolder, filePath));
+}
+
+function mapDiagnosticSeverity(
+  severity: ReviewSessionView['findings'][number]['severity']
+): vscode.DiagnosticSeverity {
+  switch (severity) {
+    case 'critical':
+    case 'high':
+      return vscode.DiagnosticSeverity.Error;
+    case 'medium':
+      return vscode.DiagnosticSeverity.Warning;
+    default:
+      return vscode.DiagnosticSeverity.Information;
+  }
+}
+
+function applyReviewDiagnostics(
+  session: ReviewSessionView,
+  collection: vscode.DiagnosticCollection
+): void {
+  collection.clear();
+
+  const diagnosticsByFile = new Map<string, vscode.Diagnostic[]>();
+
+  for (const finding of session.findings) {
+    if (!finding.filePath) {
+      continue;
+    }
+
+    const uri = resolveFindingUri(finding.filePath);
+    if (!uri) {
+      continue;
+    }
+
+    const startLine = Math.max((finding.line ?? 1) - 1, 0);
+    const endLine = Math.max((finding.endLine ?? finding.line ?? 1) - 1, startLine);
+    const range = new vscode.Range(startLine, 0, endLine, 200);
+    const messageLines = [finding.title, finding.summary];
+
+    if (finding.suggestedAction) {
+      messageLines.push(`Next: ${finding.suggestedAction}`);
+    }
+
+    const diagnostic = new vscode.Diagnostic(
+      range,
+      messageLines.join('\n'),
+      mapDiagnosticSeverity(finding.severity)
+    );
+    diagnostic.source = 'Diffmint';
+    diagnostic.code = finding.id;
+
+    const key = uri.toString();
+    const current = diagnosticsByFile.get(key) ?? [];
+    current.push(diagnostic);
+    diagnosticsByFile.set(key, current);
+  }
+
+  for (const [uri, diagnostics] of diagnosticsByFile.entries()) {
+    collection.set(vscode.Uri.parse(uri), diagnostics);
+  }
+}
+
+async function openFindingInEditor(finding: ReviewSessionView['findings'][number]): Promise<void> {
+  if (!finding.filePath) {
+    void vscode.window.showInformationMessage('This finding does not include a file location.');
+    return;
+  }
+
+  const uri = resolveFindingUri(finding.filePath);
+
+  if (!uri) {
+    void vscode.window.showWarningMessage('Open the matching workspace to jump to this finding.');
+    return;
+  }
+
+  const document = await vscode.workspace.openTextDocument(uri);
+  const editor = await vscode.window.showTextDocument(document, vscode.ViewColumn.One);
+  const line = Math.max((finding.line ?? 1) - 1, 0);
+  const range = new vscode.Range(line, 0, line, 0);
+  editor.selection = new vscode.Selection(range.start, range.end);
+  editor.revealRange(range, vscode.TextEditorRevealType.InCenter);
+}
+
+function formatHistoryPickLabel(session: ReviewSessionView): string {
+  return `${session.traceId} · ${truncateText(session.summary, 64)}`;
+}
+
 function updateStatusBar(item: vscode.StatusBarItem): void {
   const config = readDiffmintConfig(getDiffmintPaths().configPath);
 
@@ -150,7 +251,8 @@ function renderReviewResult(raw: string): RenderedResult {
 
   return {
     body: session.summary,
-    html: renderReviewSessionHtml(session)
+    html: renderReviewSessionHtml(session),
+    reviewSession: session
   };
 }
 
@@ -203,12 +305,19 @@ function renderSignInResult(raw: string): RenderedResult {
   };
 }
 
+async function loadReviewHistoryFromCli(): Promise<ReviewSessionView[] | null> {
+  const raw = await runCli(['history', '--json']);
+  return tryParseJson<ReviewSessionView[]>(raw);
+}
+
 async function runAndShow(
   title: string,
   args: string[],
   latestResultRef: { current: LatestResult | null },
+  latestReviewRef: { current: ReviewSessionView | null },
   providers: DiffmintTreeProvider[],
   statusBar: vscode.StatusBarItem,
+  diagnostics: vscode.DiagnosticCollection,
   options: {
     requireWorkspace?: boolean;
     render?: (raw: string) => RenderedResult;
@@ -241,6 +350,12 @@ async function runAndShow(
       html: rendered.html,
       updatedAt: new Date().toISOString()
     };
+
+    if (rendered.reviewSession) {
+      latestReviewRef.current = rendered.reviewSession;
+      applyReviewDiagnostics(rendered.reviewSession, diagnostics);
+    }
+
     providers.forEach((provider) => provider.refresh());
     updateStatusBar(statusBar);
     showResultsPanel(latestResultRef.current);
@@ -269,7 +384,11 @@ export function activate(context: vscode.ExtensionContext) {
   const latestResultRef: { current: LatestResult | null } = {
     current: null
   };
+  const latestReviewRef: { current: ReviewSessionView | null } = {
+    current: null
+  };
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  const diagnostics = vscode.languages.createDiagnosticCollection('diffmint');
   statusBar.show();
 
   const resultsProvider = new DiffmintTreeProvider(() => {
@@ -323,6 +442,51 @@ export function activate(context: vscode.ExtensionContext) {
     );
   });
 
+  const findingsProvider = new DiffmintTreeProvider(() => {
+    const session = latestReviewRef.current;
+
+    if (!session) {
+      return [
+        createItem('No findings yet', {
+          description: 'Run a review to populate findings and diagnostics',
+          iconPath: new vscode.ThemeIcon('search')
+        })
+      ];
+    }
+
+    if (session.findings.length === 0) {
+      return [
+        createItem('No actionable findings', {
+          description: 'The latest review did not record any findings',
+          iconPath: new vscode.ThemeIcon('check')
+        })
+      ];
+    }
+
+    return session.findings.map((finding) =>
+      createItem(finding.title, {
+        description: `${finding.severity.toUpperCase()} · ${
+          finding.filePath
+            ? `${finding.filePath}${finding.line ? `:${finding.line}` : ''}`
+            : 'No file location'
+        }`,
+        tooltip: finding.summary,
+        command: {
+          command: 'diffmint.openFinding',
+          title: 'Open Finding',
+          arguments: [finding]
+        },
+        iconPath: new vscode.ThemeIcon(
+          finding.severity === 'critical' || finding.severity === 'high'
+            ? 'error'
+            : finding.severity === 'medium'
+              ? 'warning'
+              : 'info'
+        )
+      })
+    );
+  });
+
   const actionsProvider = new DiffmintTreeProvider(() => [
     createItem('Sign In / Switch Workspace', {
       description: 'Connect the local CLI to the configured control plane',
@@ -355,6 +519,22 @@ export function activate(context: vscode.ExtensionContext) {
         title: 'Open Review History'
       },
       iconPath: new vscode.ThemeIcon('history')
+    }),
+    createItem('Search Review History', {
+      description: 'Filter history by trace, provider, policy, or finding text',
+      command: {
+        command: 'diffmint.searchHistory',
+        title: 'Search Review History'
+      },
+      iconPath: new vscode.ThemeIcon('search')
+    }),
+    createItem('Compare Recent Sessions', {
+      description: 'Pick two sessions and compare severity, scope, and finding deltas',
+      command: {
+        command: 'diffmint.compareHistory',
+        title: 'Compare Recent Sessions'
+      },
+      iconPath: new vscode.ThemeIcon('split-horizontal')
     }),
     createItem('Run Doctor', {
       description: 'Check runtime, auth, and control-plane readiness',
@@ -416,11 +596,19 @@ export function activate(context: vscode.ExtensionContext) {
     ];
   });
 
-  const providers = [resultsProvider, historyProvider, workspaceProvider, actionsProvider];
+  const providers = [
+    resultsProvider,
+    findingsProvider,
+    historyProvider,
+    workspaceProvider,
+    actionsProvider
+  ];
   updateStatusBar(statusBar);
 
   context.subscriptions.push(
     statusBar,
+    diagnostics,
+    vscode.window.registerTreeDataProvider('diffmint.findings', findingsProvider),
     vscode.window.registerTreeDataProvider('diffmint.results', resultsProvider),
     vscode.window.registerTreeDataProvider('diffmint.history', historyProvider),
     vscode.window.registerTreeDataProvider('diffmint.workspace', workspaceProvider),
@@ -439,8 +627,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Review',
         ['review', '--json'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           requireWorkspace: true,
           render: renderReviewResult
@@ -452,8 +642,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Review (Staged)',
         ['review', '--staged', '--json'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           requireWorkspace: true,
           render: renderReviewResult
@@ -474,8 +666,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Review (Selected Files)',
         ['review', '--files', ...targets, '--json'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           requireWorkspace: true,
           render: renderReviewResult
@@ -492,8 +686,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Explain',
         ['explain', fileName],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           requireWorkspace: true,
           render: (raw) => ({
@@ -517,8 +713,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Tests',
         ['tests', fileName],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           requireWorkspace: true,
           render: (raw) => ({
@@ -537,8 +735,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Doctor',
         ['doctor', '--json'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           render: renderDoctorResult
         }
@@ -549,13 +749,131 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint History',
         ['history', '--json'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           render: renderHistoryResult
         }
       );
     }),
+    vscode.commands.registerCommand('diffmint.searchHistory', async () => {
+      const query = await vscode.window.showInputBox({
+        prompt: 'Search trace ID, summary, provider, policy, or finding text',
+        placeHolder: 'auth, policy-v1, trace-123'
+      });
+
+      if (!query) {
+        return;
+      }
+
+      const history = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Diffmint History Search',
+          cancellable: false
+        },
+        async () => loadReviewHistoryFromCli()
+      );
+
+      if (!history) {
+        void vscode.window.showErrorMessage('Unable to parse Diffmint history as JSON.');
+        return;
+      }
+
+      const filtered = history.filter((session) =>
+        [
+          session.traceId,
+          session.summary,
+          session.provider,
+          session.model,
+          session.policyVersionId,
+          session.source,
+          session.commandSource,
+          session.context?.fileSummary,
+          ...session.findings.map((finding) => finding.title),
+          ...session.findings.map((finding) => finding.summary)
+        ]
+          .filter(Boolean)
+          .join('\n')
+          .toLowerCase()
+          .includes(query.toLowerCase())
+      );
+
+      latestResultRef.current = {
+        title: `Diffmint History Search: ${query}`,
+        body: `${filtered.length} matching review session(s)`,
+        html: renderHistoryHtml(filtered),
+        updatedAt: new Date().toISOString()
+      };
+      providers.forEach((provider) => provider.refresh());
+      showResultsPanel(latestResultRef.current);
+    }),
+    vscode.commands.registerCommand('diffmint.compareHistory', async () => {
+      const history = await vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'Diffmint Compare History',
+          cancellable: false
+        },
+        async () => loadReviewHistoryFromCli()
+      );
+
+      if (!history || history.length < 2) {
+        void vscode.window.showInformationMessage(
+          'Diffmint needs at least two review sessions to compare history.'
+        );
+        return;
+      }
+
+      const firstPick = await vscode.window.showQuickPick(
+        history.map((session) => ({
+          label: formatHistoryPickLabel(session),
+          description: session.provider ?? 'unknown',
+          session
+        })),
+        {
+          placeHolder: 'Select the first review session'
+        }
+      );
+
+      if (!firstPick) {
+        return;
+      }
+
+      const secondPick = await vscode.window.showQuickPick(
+        history
+          .filter((session) => session.traceId !== firstPick.session.traceId)
+          .map((session) => ({
+            label: formatHistoryPickLabel(session),
+            description: session.provider ?? 'unknown',
+            session
+          })),
+        {
+          placeHolder: 'Select the second review session'
+        }
+      );
+
+      if (!secondPick) {
+        return;
+      }
+
+      latestResultRef.current = {
+        title: 'Diffmint History Compare',
+        body: `${firstPick.session.traceId} vs ${secondPick.session.traceId}`,
+        html: renderHistoryCompareHtml(firstPick.session, secondPick.session),
+        updatedAt: new Date().toISOString()
+      };
+      providers.forEach((provider) => provider.refresh());
+      showResultsPanel(latestResultRef.current);
+    }),
+    vscode.commands.registerCommand(
+      'diffmint.openFinding',
+      async (finding: ReviewSessionView['findings'][number]) => {
+        await openFindingInEditor(finding);
+      }
+    ),
     vscode.commands.registerCommand('diffmint.openTeamRules', async () => {
       await vscode.env.openExternal(
         vscode.Uri.parse(buildWebUrl(getWebBaseUrl(), '/dashboard/policies'))
@@ -566,8 +884,10 @@ export function activate(context: vscode.ExtensionContext) {
         'Diffmint Sign In',
         ['auth', 'login'],
         latestResultRef,
+        latestReviewRef,
         providers,
         statusBar,
+        diagnostics,
         {
           render: renderSignInResult
         }

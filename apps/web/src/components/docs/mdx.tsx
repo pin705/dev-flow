@@ -3,6 +3,7 @@ import { MDXRemote } from 'next-mdx-remote/rsc';
 import remarkGfm from 'remark-gfm';
 import { Children, isValidElement, type HTMLAttributes, type ReactNode } from 'react';
 import { Icons } from '@/components/icons';
+import { CopyButton } from '@/components/ui/copy-button';
 import { cn } from '@/lib/utils';
 import { slugifyDocHeading } from '@diffmint/docs-content';
 
@@ -22,6 +23,22 @@ function getPlainText(children: ReactNode): string {
     .join(' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function getCodeText(children: ReactNode): string {
+  return Children.toArray(children)
+    .map((child) => {
+      if (typeof child === 'string' || typeof child === 'number') {
+        return String(child);
+      }
+
+      if (isValidElement<{ children?: ReactNode }>(child)) {
+        return getCodeText(child.props.children);
+      }
+
+      return '';
+    })
+    .join('');
 }
 
 function createHeadingIdGetter() {
@@ -146,12 +163,24 @@ export async function DocMdx({ source }: { source: string }) {
         {...props}
       />
     ),
-    pre: (props: HTMLAttributes<HTMLPreElement>) => (
-      <pre
-        className='mt-8 overflow-x-auto rounded-[1.6rem] border border-border/70 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--card)_88%,transparent),color-mix(in_oklab,var(--muted)_26%,transparent))] px-5 py-5 text-sm leading-7 shadow-sm [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0'
-        {...props}
-      />
-    ),
+    pre: ({ children, className, ...props }: HTMLAttributes<HTMLPreElement>) => {
+      const codeText = getCodeText(children).trimEnd();
+
+      return (
+        <div className='relative mt-8'>
+          {codeText ? <CopyButton text={codeText} className='absolute top-3 right-3 z-10' /> : null}
+          <pre
+            className={cn(
+              'overflow-x-auto rounded-[1.6rem] border border-border/70 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--card)_88%,transparent),color-mix(in_oklab,var(--muted)_26%,transparent))] px-5 py-5 pr-20 text-sm leading-7 shadow-sm [&_code]:border-0 [&_code]:bg-transparent [&_code]:p-0',
+              className
+            )}
+            {...props}
+          >
+            {children}
+          </pre>
+        </div>
+      );
+    },
     table: (props: HTMLAttributes<HTMLTableElement>) => (
       <div className='mt-8 overflow-hidden rounded-[1.4rem] border border-border/70 shadow-sm'>
         <table className='w-full border-collapse bg-background/80 text-sm' {...props} />

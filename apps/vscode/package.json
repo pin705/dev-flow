@@ -54,8 +54,20 @@
         "title": "Diffmint: Open Review History"
       },
       {
+        "command": "diffmint.searchHistory",
+        "title": "Diffmint: Search Review History"
+      },
+      {
+        "command": "diffmint.compareHistory",
+        "title": "Diffmint: Compare Recent Sessions"
+      },
+      {
         "command": "diffmint.runDoctor",
         "title": "Diffmint: Run Doctor"
+      },
+      {
+        "command": "diffmint.openFinding",
+        "title": "Diffmint: Open Finding"
       },
       {
         "command": "diffmint.openTeamRules",
@@ -92,6 +104,10 @@
         {
           "id": "diffmint.actions",
           "name": "Quick Actions"
+        },
+        {
+          "id": "diffmint.findings",
+          "name": "Findings"
         },
         {
           "id": "diffmint.results",
@@ -140,6 +156,11 @@
         },
         {
           "command": "diffmint.refreshViews",
+          "when": "view == diffmint.findings",
+          "group": "navigation"
+        },
+        {
+          "command": "diffmint.refreshViews",
           "when": "view == diffmint.results",
           "group": "navigation"
         },
@@ -172,9 +193,11 @@
     }
   },
   "activationEvents": [
+    "onCommand:diffmint.compareHistory",
     "onCommand:diffmint.explainCurrentFile",
     "onCommand:diffmint.generateTests",
     "onCommand:diffmint.openDashboard",
+    "onCommand:diffmint.openFinding",
     "onCommand:diffmint.openHistory",
     "onCommand:diffmint.openTeamRules",
     "onCommand:diffmint.refreshViews",
@@ -182,6 +205,7 @@
     "onCommand:diffmint.reviewSelectedFiles",
     "onCommand:diffmint.reviewStagedChanges",
     "onCommand:diffmint.runDoctor",
+    "onCommand:diffmint.searchHistory",
     "onCommand:diffmint.showLatestResult",
     "onCommand:diffmint.signIn"
   ],

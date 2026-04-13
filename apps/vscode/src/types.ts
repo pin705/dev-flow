@@ -25,6 +25,9 @@ export interface ReviewFinding {
   title: string;
   summary: string;
   filePath?: string;
+  line?: number;
+  endLine?: number;
+  excerpt?: string;
   suggestedAction?: string;
 }
 
@@ -49,6 +52,16 @@ export interface ReviewSessionView {
   status: string;
   findings: ReviewFinding[];
   context?: ReviewContextSummary;
+  convention?: {
+    promptProfile: string;
+    source: 'default' | 'workspace-file';
+    filePath?: string;
+    additionalPriorities: string[];
+    reviewNotes: string[];
+    snippetContextLines: number;
+    maxVisibleFiles: number;
+    maxFileGroups: number;
+  };
   summary: string;
   severityCounts: {
     critical: number;

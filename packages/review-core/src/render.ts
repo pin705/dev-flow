@@ -23,6 +23,30 @@ function renderSeveritySummary(findings: Finding[]): string {
   ].join(' | ');
 }
 
+function formatFindingLocation(finding: Finding): string | null {
+  if (!finding.filePath) {
+    return null;
+  }
+
+  if (finding.line && finding.endLine && finding.endLine !== finding.line) {
+    return `${finding.filePath}:${finding.line}-${finding.endLine}`;
+  }
+
+  if (finding.line) {
+    return `${finding.filePath}:${finding.line}`;
+  }
+
+  return finding.filePath;
+}
+
+function renderTerminalExcerpt(finding: Finding): string[] {
+  if (!finding.excerpt) {
+    return [];
+  }
+
+  return ['     Code:', ...finding.excerpt.split('\n').map((line) => `       ${line}`)];
+}
+
 function renderContextLines(context: ReviewContextSummary): string[] {
   const lines = [
     `  Files: ${context.fileSummary}`,
@@ -49,12 +73,14 @@ function renderFindingLines(findings: Finding[]): string[] {
 
   return findings.flatMap((finding, index) => {
     const lines = [`  ${index + 1}. ${finding.severity.toUpperCase()} ${finding.title}`];
+    const location = formatFindingLocation(finding);
 
-    if (finding.filePath) {
-      lines.push(`     File: ${finding.filePath}`);
+    if (location) {
+      lines.push(`     File: ${location}`);
     }
 
     lines.push(`     Why: ${finding.summary}`);
+    lines.push(...renderTerminalExcerpt(finding));
 
     if (finding.suggestedAction) {
       lines.push(`     Next: ${finding.suggestedAction}`);
@@ -116,12 +142,20 @@ function renderMarkdownFinding(findings: Finding[]): string {
   return findings
     .map((finding, index) => {
       const lines = [`${index + 1}. **${finding.severity.toUpperCase()}** ${finding.title}`];
+      const location = formatFindingLocation(finding);
 
-      if (finding.filePath) {
-        lines.push(`   - File: \`${finding.filePath}\``);
+      if (location) {
+        lines.push(`   - File: \`${location}\``);
       }
 
       lines.push(`   - Why: ${finding.summary}`);
+
+      if (finding.excerpt) {
+        lines.push('   - Code:');
+        lines.push('```text');
+        lines.push(finding.excerpt);
+        lines.push('```');
+      }
 
       if (finding.suggestedAction) {
         lines.push(`   - Next: ${finding.suggestedAction}`);

@@ -105,4 +105,38 @@ describe('diffmint cli', () => {
     expect(history).toHaveLength(1);
     expect(history[0]?.provider).toBe('qwen-enterprise');
   }, 15_000);
+
+  it('supports history filtering and comparison output', () => {
+    const homeDir = makeTempDir('diffmint-cli-home-');
+    const { repoDir, filePath } = createRepoWithChangedFile();
+    const docsPath = path.join(repoDir, 'packages/docs-content/content/cli/reference.mdx');
+
+    expect(runCli(['auth', 'login'], repoDir, homeDir).status).toBe(0);
+    expect(runCli(['review', '--files', filePath], repoDir, homeDir).status).toBe(0);
+
+    mkdirSync(path.dirname(docsPath), { recursive: true });
+    writeFileSync(docsPath, '# Docs\nUpdated guidance.\n', 'utf8');
+
+    expect(
+      runCli(
+        ['review', '--files', 'packages/docs-content/content/cli/reference.mdx'],
+        repoDir,
+        homeDir
+      ).status
+    ).toBe(0);
+
+    const filteredResult = runCli(
+      ['history', '--query', 'Governance content changed', '--json'],
+      repoDir,
+      homeDir
+    );
+    const filtered = JSON.parse(filteredResult.stdout) as Array<{ traceId: string }>;
+    const compareResult = runCli(['history', '--compare', 'latest', 'previous'], repoDir, homeDir);
+
+    expect(filteredResult.status).toBe(0);
+    expect(filtered).toHaveLength(1);
+    expect(compareResult.status).toBe(0);
+    expect(compareResult.stdout).toContain('Diffmint History Compare');
+    expect(compareResult.stdout).toContain('Only in A:');
+  }, 15_000);
 });

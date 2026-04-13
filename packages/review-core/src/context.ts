@@ -1,6 +1,7 @@
 import type {
   Finding,
   PolicyBundle,
+  ReviewConventionMetadata,
   ReviewContextGroup,
   ReviewContextSummary,
   ReviewRequest,
@@ -10,6 +11,11 @@ import type {
 const MAX_VISIBLE_FILES = 5;
 const MAX_PROMPT_FILES = 8;
 const MAX_FILE_GROUPS = 6;
+
+export interface ReviewContextSummaryOptions {
+  maxVisibleFiles?: number;
+  maxFileGroups?: number;
+}
 
 function humanizeSource(source: ReviewSourceType): string {
   return source
@@ -42,7 +48,7 @@ function sortFileGroups(groups: ReviewContextGroup[]): ReviewContextGroup[] {
   });
 }
 
-function buildFileGroups(files: string[]): ReviewContextGroup[] {
+function buildFileGroups(files: string[], maxFileGroups = MAX_FILE_GROUPS): ReviewContextGroup[] {
   const counts = new Map<string, number>();
 
   for (const file of files) {
@@ -55,7 +61,7 @@ function buildFileGroups(files: string[]): ReviewContextGroup[] {
       label,
       count
     }))
-  ).slice(0, MAX_FILE_GROUPS);
+  ).slice(0, maxFileGroups);
 }
 
 function buildDiffStats(diff: string, fileCount: number): ReviewContextSummary['diffStats'] {
@@ -117,9 +123,26 @@ function formatVisibleFiles(
   };
 }
 
-export function buildReviewContextSummary(request: ReviewRequest): ReviewContextSummary {
-  const fileGroups = buildFileGroups(request.files);
-  const { visibleFiles, remainingFileCount } = formatVisibleFiles(request.files);
+function resolveContextLimits(
+  convention: ReviewConventionMetadata | undefined,
+  options: ReviewContextSummaryOptions
+): { maxVisibleFiles: number; maxFileGroups: number } {
+  return {
+    maxVisibleFiles: options.maxVisibleFiles ?? convention?.maxVisibleFiles ?? MAX_VISIBLE_FILES,
+    maxFileGroups: options.maxFileGroups ?? convention?.maxFileGroups ?? MAX_FILE_GROUPS
+  };
+}
+
+export function buildReviewContextSummary(
+  request: ReviewRequest,
+  options: ReviewContextSummaryOptions = {}
+): ReviewContextSummary {
+  const limits = resolveContextLimits(request.metadata.convention, options);
+  const fileGroups = buildFileGroups(request.files, limits.maxFileGroups);
+  const { visibleFiles, remainingFileCount } = formatVisibleFiles(
+    request.files,
+    limits.maxVisibleFiles
+  );
 
   return {
     sourceLabel: humanizeSource(request.source),
@@ -196,6 +219,7 @@ function formatPromptVisibleFiles(context: ReviewContextSummary): string {
 
 export function buildHeadlessReviewPrompt(request: ReviewRequest, policy?: PolicyBundle): string {
   const context = request.metadata.context ?? buildReviewContextSummary(request);
+  const convention = request.metadata.convention;
   const instructions = [
     'Role',
     'You are Diffmint, a policy-driven code review runtime.',
@@ -217,6 +241,16 @@ export function buildHeadlessReviewPrompt(request: ReviewRequest, policy?: Polic
     '',
     'Policy Context'
   ];
+
+  if (convention?.additionalPriorities.length) {
+    instructions.push('', 'Team Priorities');
+    instructions.push(...convention.additionalPriorities.map((item) => `- ${item}`));
+  }
+
+  if (convention?.reviewNotes.length) {
+    instructions.push('', 'Review Notes');
+    instructions.push(...convention.reviewNotes.map((item) => `- ${item}`));
+  }
 
   if (policy) {
     instructions.push(`- Active policy version: ${policy.policyVersionId}.`);
@@ -240,7 +274,7 @@ export function buildHeadlessReviewPrompt(request: ReviewRequest, policy?: Polic
     'Output Contract',
     '- Return valid JSON only.',
     '- Use this shape exactly:',
-    '{"summary":"string","findings":[{"severity":"low|medium|high|critical","title":"string","summary":"string","filePath":"optional string","suggestedAction":"optional string"}]}',
+    '{"summary":"string","findings":[{"severity":"low|medium|high|critical","title":"string","summary":"string","filePath":"optional string","line":"optional number","excerpt":"optional string","suggestedAction":"optional string"}]}',
     '- Prefer 0-5 findings, ordered by risk.'
   );
 

@@ -19,6 +19,10 @@ function formatSourceLabel(value: string): string {
   return value.split('_').join(' ');
 }
 
+function formatFindingTitles(findings: ReviewSession['findings']): string {
+  return findings.length === 0 ? 'None' : findings.map((finding) => finding.title).join(', ');
+}
+
 export function renderCliHelp(): string {
   return [
     'Diffmint CLI',
@@ -41,6 +45,8 @@ export function renderCliHelp(): string {
     'Diagnostics',
     '  dm history',
     '  dm history --json',
+    '  dm history --provider qwen --query auth',
+    '  dm history --compare latest previous',
     '  dm doctor',
     '  dm doctor --json',
     '',
@@ -52,6 +58,7 @@ export function renderCliHelp(): string {
     '  dm review --base origin/main --mode security',
     '  dm review --files apps/cli/src/index.ts --markdown',
     '  dm history --json',
+    '  dm history --compare latest previous',
     '  dm doctor --json'
   ].join('\n');
 }
@@ -98,6 +105,39 @@ export function renderHistorySessions(entries: ReviewSession[]): string {
   });
 
   return lines.join('\n').trimEnd();
+}
+
+export function renderHistoryComparison(left: ReviewSession, right: ReviewSession): string {
+  const leftTitles = new Set(left.findings.map((finding) => finding.title));
+  const rightTitles = new Set(right.findings.map((finding) => finding.title));
+  const leftOnly = left.findings.filter((finding) => !rightTitles.has(finding.title));
+  const rightOnly = right.findings.filter((finding) => !leftTitles.has(finding.title));
+
+  return [
+    'Diffmint History Compare',
+    '========================',
+    '',
+    'Session A',
+    `  Trace ID: ${left.traceId}`,
+    `  Summary: ${left.summary}`,
+    `  Severity: ${formatSeveritySummary(left)}`,
+    `  Scope: ${left.context?.fileSummary ?? 'No scope metadata'}`,
+    `  Findings: ${formatFindingTitles(left.findings)}`,
+    '',
+    'Session B',
+    `  Trace ID: ${right.traceId}`,
+    `  Summary: ${right.summary}`,
+    `  Severity: ${formatSeveritySummary(right)}`,
+    `  Scope: ${right.context?.fileSummary ?? 'No scope metadata'}`,
+    `  Findings: ${formatFindingTitles(right.findings)}`,
+    '',
+    'Finding Deltas',
+    `  Only in A: ${formatFindingTitles(leftOnly)}`,
+    `  Only in B: ${formatFindingTitles(rightOnly)}`,
+    '',
+    'Next Step',
+    '  - Reopen the two trace IDs above and confirm whether the newer report improved the highest-risk findings.'
+  ].join('\n');
 }
 
 export function renderExplainOutput(target: string, source: string): string {

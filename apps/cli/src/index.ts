@@ -13,15 +13,23 @@ import {
   buildReviewRequest,
   createReviewSessionWithRuntime,
   type DoctorCheck,
+  inspectReviewConvention,
   renderMarkdownSession,
   renderTerminalSession,
   runDoctor
 } from '@diffmint/review-core';
 import { sanitizeReviewSessionForCloudSync } from '@diffmint/review-core';
 import {
+  filterHistorySessions,
+  findHistorySessionBySelector,
+  type HistoryCompareOptions,
+  type HistoryFilterOptions
+} from './history';
+import {
   renderCliHelp,
   renderDoctorChecks,
   renderExplainOutput,
+  renderHistoryComparison,
   renderHistorySessions,
   renderSuggestedTests
 } from './presentation';
@@ -176,6 +184,82 @@ function parseFlags(args: string[]) {
       }
       flags.files = files;
       index = pointer - 1;
+    }
+  }
+
+  return flags;
+}
+
+function parseHistoryFlags(args: string[]): {
+  json: boolean;
+  provider?: string;
+  policy?: string;
+  source?: string;
+  query?: string;
+  limit?: number;
+  compare?: HistoryCompareOptions;
+} {
+  const flags: {
+    json: boolean;
+    provider?: string;
+    policy?: string;
+    source?: string;
+    query?: string;
+    limit?: number;
+    compare?: HistoryCompareOptions;
+  } = {
+    json: false
+  };
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === '--json') {
+      flags.json = true;
+      continue;
+    }
+
+    if (arg === '--provider') {
+      flags.provider = args[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--policy') {
+      flags.policy = args[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--source') {
+      flags.source = args[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--query') {
+      flags.query = args[index + 1];
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--limit') {
+      const value = Number(args[index + 1]);
+      flags.limit = Number.isFinite(value) && value > 0 ? value : undefined;
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--compare') {
+      const leftSelector = args[index + 1];
+      const rightSelector = args[index + 2];
+      if (leftSelector && rightSelector) {
+        flags.compare = {
+          leftSelector,
+          rightSelector
+        };
+      }
+      index += 2;
     }
   }
 
@@ -562,6 +646,7 @@ async function loadHistory(config: LocalConfig): Promise<ReviewSession[]> {
 async function extendDoctorOutput(config: LocalConfig): Promise<DoctorCheck[]> {
   const checks = runDoctor(process.cwd());
   const queueSize = getSyncQueueSize();
+  const convention = inspectReviewConvention(process.cwd());
   const extendedChecks: DoctorCheck[] = [
     ...checks,
     {
@@ -580,6 +665,13 @@ async function extendDoctorOutput(config: LocalConfig): Promise<DoctorCheck[]> {
         queueSize === 0
           ? 'No queued sync items.'
           : `${queueSize} queued sync item(s) waiting for the control plane.`
+    },
+    {
+      id: 'review-convention',
+      label: 'Review convention',
+      status:
+        convention.status === 'loaded' ? 'ok' : convention.status === 'invalid' ? 'warn' : 'ok',
+      detail: convention.detail
     }
   ];
 
@@ -769,12 +861,39 @@ async function main() {
   }
 
   if (command === 'history') {
+    const historyArgs = [subcommand, ...rest].filter(Boolean);
+    const flags = parseHistoryFlags(historyArgs);
     const history = await loadHistory(readConfig());
-    const useJson = hasFlag([subcommand, ...rest].filter(Boolean), '--json');
-    if (useJson) {
-      output(history, true);
+    const filteredHistory = filterHistorySessions(history, {
+      provider: flags.provider,
+      policy: flags.policy,
+      source: flags.source,
+      query: flags.query,
+      limit: flags.limit
+    } satisfies HistoryFilterOptions);
+
+    if (flags.compare) {
+      const left = findHistorySessionBySelector(filteredHistory, flags.compare.leftSelector);
+      const right = findHistorySessionBySelector(filteredHistory, flags.compare.rightSelector);
+
+      if (!left || !right) {
+        throw new Error(
+          `Unable to resolve history comparison targets: ${flags.compare.leftSelector}, ${flags.compare.rightSelector}`
+        );
+      }
+
+      if (flags.json) {
+        output({ left, right }, true);
+      } else {
+        console.log(renderHistoryComparison(left, right));
+      }
+      return;
+    }
+
+    if (flags.json) {
+      output(filteredHistory, true);
     } else {
-      console.log(renderHistorySessions(history));
+      console.log(renderHistorySessions(filteredHistory));
     }
     return;
   }

@@ -8,6 +8,7 @@ import {
   createReviewSession,
   createReviewSessionWithRuntime,
   renderMarkdownSession,
+  renderTerminalSession,
   sanitizeReviewSessionForCloudSync,
   runDoctor
 } from '../../packages/review-core/src/index.ts';
@@ -77,6 +78,42 @@ describe('review core', () => {
     expect(request.metadata.context?.fileGroups).toEqual([{ label: 'src', count: 1 }]);
   });
 
+  it('normalizes absolute file selections and loads workspace review conventions', () => {
+    const { repoDir, filePath } = createRepoWithChangedFile('apps/web/src/app/api/health/route.ts');
+    const absoluteFilePath = path.join(repoDir, filePath);
+    const conventionDir = path.join(repoDir, '.diffmint');
+
+    mkdirSync(conventionDir, { recursive: true });
+    writeFileSync(
+      path.join(conventionDir, 'review-conventions.json'),
+      JSON.stringify(
+        {
+          promptProfile: 'diffmint-team-web-v2',
+          additionalPriorities: ['Prefer crisp, non-duplicated findings.'],
+          reviewNotes: ['Surface route and auth regressions before style feedback.'],
+          snippetContextLines: 1,
+          maxVisibleFiles: 3,
+          maxFileGroups: 2
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const request = buildReviewRequest({
+      cwd: repoDir,
+      source: 'selected_files',
+      files: [absoluteFilePath]
+    });
+
+    expect(request.files).toEqual([filePath]);
+    expect(request.promptProfile).toBe('diffmint-team-web-v2');
+    expect(request.metadata.convention?.source).toBe('workspace-file');
+    expect(request.metadata.convention?.snippetContextLines).toBe(1);
+    expect(request.metadata.context?.visibleFiles).toEqual([filePath]);
+  });
+
   it('creates governance-aware findings and markdown output', () => {
     const { repoDir, filePath } = createRepoWithChangedFile();
     const request = buildReviewRequest({
@@ -91,10 +128,17 @@ describe('review core', () => {
     expect(session.provider).toBe('qwen-enterprise');
     expect(session.severityCounts.high).toBe(1);
     expect(session.severityCounts.medium).toBeGreaterThanOrEqual(1);
+    expect(session.findings[0]?.line).toBeGreaterThan(0);
+    expect(session.findings[0]?.excerpt).toContain('force-dynamic');
     expect(markdown).toContain('# Diffmint Review');
     expect(markdown).toContain('## Context');
     expect(markdown).toContain('File groups: src (1)');
+    expect(markdown).toContain('```text');
     expect(markdown).toContain('Sensitive control-plane surface changed');
+
+    const terminal = renderTerminalSession(request, session.findings);
+    expect(terminal).toContain('Code:');
+    expect(terminal).toContain('force-dynamic');
   });
 
   it('redacts sensitive values and omits raw provider output for cloud sync', () => {

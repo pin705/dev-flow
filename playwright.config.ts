@@ -24,8 +24,7 @@ export default defineConfig({
     env: {
       DIFFMINT_DISABLE_CLERK: 'true',
       NEXT_PUBLIC_DIFFMINT_DISABLE_CLERK: 'true',
-      NEXT_TELEMETRY_DISABLED: '1',
-      NEXT_PUBLIC_SENTRY_DISABLED: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
     }
   }
 });

@@ -11,7 +11,6 @@ services:
     environment:
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_SENTRY_DISABLED: "true"
       WATCHPACK_POLLING: "true"
       CHOKIDAR_USEPOLLING: "true"
       DATABASE_URL: postgres://diffmint:diffmint@postgres:5432/diffmint

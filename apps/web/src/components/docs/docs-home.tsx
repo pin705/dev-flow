@@ -46,10 +46,6 @@ const sectionVisuals: Record<
     icon: 'help',
     accentClass: 'bg-orange-500/10 text-orange-700'
   },
-  Changelog: {
-    icon: 'calendar',
-    accentClass: 'bg-violet-500/10 text-violet-700'
-  },
   'Release Channels': {
     icon: 'trendingUp',
     accentClass: 'bg-sky-500/10 text-sky-700'

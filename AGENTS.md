@@ -13,7 +13,6 @@ This file provides essential information for AI coding agents working on this pr
 - **Styling**: Tailwind CSS v4
 - **UI Components**: shadcn/ui (New York style)
 - **Authentication**: Clerk (with Organizations/Billing support)
-- **Error Tracking**: Sentry
 - **Charts**: Recharts
 - **Containerization**: Docker (Node.js & Bun Dockerfiles)
 - **Package Manager**: Bun (preferred) or npm
@@ -96,7 +95,7 @@ The project follows a feature-based folder structure designed for scalability in
 │   ├── api/               # API routes (if any)
 │   ├── layout.tsx         # Root layout with providers
 │   ├── page.tsx           # Landing page
-│   ├── global-error.tsx   # Sentry-integrated error boundary
+│   ├── global-error.tsx   # Global error boundary
 │   └── not-found.tsx      # 404 page
 │
 ├── components/
@@ -211,16 +210,6 @@ NEXT_PUBLIC_CLERK_SIGN_IN_URL="/auth/sign-in"
 NEXT_PUBLIC_CLERK_SIGN_UP_URL="/auth/sign-up"
 NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL="/dashboard/overview"
 NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL="/dashboard/overview"
-```
-
-### Optional for Error Tracking (Sentry)
-
-```env
-NEXT_PUBLIC_SENTRY_DSN=https://...@....ingest.sentry.io/...
-NEXT_PUBLIC_SENTRY_ORG=your-org
-NEXT_PUBLIC_SENTRY_PROJECT=your-project
-SENTRY_AUTH_TOKEN=sntrys_...
-NEXT_PUBLIC_SENTRY_DISABLED="false"  # Set to "true" to disable in dev
 ```
 
 **Note**: Clerk supports "keyless mode" - the app works without API keys for initial development.
@@ -499,25 +488,11 @@ Tables use TanStack Table with React Query:
 
 ---
 
-## Error Handling & Monitoring
-
-### Sentry Integration
-
-Sentry is configured for both client and server:
-
-- Client config: `src/instrumentation-client.ts`
-- Server config: `src/instrumentation.ts`
-- Global error: `src/app/global-error.tsx`
-
-To disable Sentry in development:
-
-```env
-NEXT_PUBLIC_SENTRY_DISABLED="true"
-```
+## Error Handling
 
 ### Error Boundaries
 
-- `global-error.tsx` - Catches all errors, reports to Sentry
+- `global-error.tsx` - Catches uncaught application errors
 - Parallel route `error.tsx` files for specific sections
 
 ---
@@ -556,7 +531,6 @@ Ensure these are set in your deployment platform:
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`
 - `CLERK_SECRET_KEY`
 - All `NEXT_PUBLIC_*` variables for client-side access
-- `SENTRY_*` variables if using error tracking
 
 ### Docker
 
@@ -571,7 +545,6 @@ Both use `output: 'standalone'` in `next.config.ts`. Pass `NEXT_PUBLIC_*` vars a
 
 - Output: `standalone` (optimized for Docker/self-hosting)
 - Images: Configured for `api.slingacademy.com`, `img.clerk.com`, `clerk.com`
-- Sentry source maps uploaded automatically in CI
 
 ---
 
@@ -589,7 +562,6 @@ node scripts/cleanup.js kanban          # Remove kanban board
 node scripts/cleanup.js chat            # Remove messaging UI
 node scripts/cleanup.js notifications   # Remove notification center
 node scripts/cleanup.js themes          # Keep one theme, remove rest
-node scripts/cleanup.js sentry          # Remove error tracking
 
 # Remove multiple at once
 node scripts/cleanup.js kanban chat notifications
@@ -734,7 +706,6 @@ See "Theming System" section above or `docs/themes.md`.
 - [shadcn/ui](https://ui.shadcn.com/docs)
 - [Tailwind CSS v4](https://tailwindcss.com/docs)
 - [TanStack Table](https://tanstack.com/table/latest)
-- [Sentry Next.js](https://docs.sentry.io/platforms/javascript/guides/nextjs/)
 
 ---
 

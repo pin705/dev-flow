@@ -174,17 +174,10 @@ Main groups:
 - App URL: `DIFFMINT_APP_URL`
 - release signing: `DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY`, `DIFFMINT_RELEASE_SIGNING_KEY_ID`
 - web security hardening: `DIFFMINT_ENABLE_HSTS`
-- Sentry: `NEXT_PUBLIC_SENTRY_DSN`, `NEXT_PUBLIC_SENTRY_ORG`, `NEXT_PUBLIC_SENTRY_PROJECT`, `SENTRY_AUTH_TOKEN`
-
-Sentry is optional. Runtime monitoring only turns on when a DSN is configured, and the build plugin
-only turns on when the DSN, org, project, and auth token are all present.
 
 The web app now emits baseline security headers for pages and APIs, including `X-Frame-Options`,
 `Referrer-Policy`, and `Permissions-Policy`. `Strict-Transport-Security` is enabled in production
 and can be forced on with `DIFFMINT_ENABLE_HSTS=true`.
-
-When Sentry runtime monitoring is off, the web build now aliases Sentry imports to a no-op runtime
-to avoid unnecessary OpenTelemetry build noise and keep local production smoke runs cleaner.
 
 For local production smoke tests, you can force public-mode auth behavior even if your machine has
 Clerk keys in `apps/web/.env`:

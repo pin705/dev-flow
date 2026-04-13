@@ -25,7 +25,7 @@ describe('docs content', () => {
     const navigation = getDocsNavigation();
 
     expect(navigation[0]?.section).toBe('Getting Started');
-    expect(navigation.map((group) => group.section)).toContain('Changelog');
+    expect(navigation.map((group) => group.section)).not.toContain('Changelog');
     expect(
       navigation.flatMap((group) => group.items).some((item) => item.slug === 'cli/reference')
     ).toBe(true);

@@ -1,6 +1,4 @@
-import path from 'node:path';
 import type { NextConfig } from 'next';
-import { getSentryWebpackAliases, getSentryWebpackIgnoreWarnings } from './src/lib/sentry/webpack';
 import { buildSecurityHeaders } from './security-headers';
 
 // Define the base Next.js configuration
@@ -42,15 +40,6 @@ const baseConfig: NextConfig = {
   ],
   webpack(config) {
     config.resolve ??= {};
-    config.resolve.alias = {
-      ...(config.resolve.alias ?? {}),
-      ...getSentryWebpackAliases(path.resolve(__dirname))
-    };
-    config.ignoreWarnings = [
-      ...(Array.isArray(config.ignoreWarnings) ? config.ignoreWarnings : []),
-      ...getSentryWebpackIgnoreWarnings()
-    ];
-
     return config;
   },
   compiler: {
@@ -58,7 +47,4 @@ const baseConfig: NextConfig = {
   }
 };
 
-let configWithPlugins = baseConfig;
-
-const nextConfig = configWithPlugins;
-export default nextConfig;
+export default baseConfig;

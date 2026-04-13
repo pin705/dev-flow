@@ -38,10 +38,6 @@ const baseConfig: NextConfig = {
     '@diffmint/policy-engine',
     '@diffmint/review-core'
   ],
-  webpack(config) {
-    config.resolve ??= {};
-    return config;
-  },
   compiler: {
     removeConsole: process.env.NODE_ENV === 'production'
   }

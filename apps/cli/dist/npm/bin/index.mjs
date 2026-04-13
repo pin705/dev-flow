@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 // src/index.ts
+import { execFileSync as execFileSync2 } from "node:child_process";
 import { randomUUID as randomUUID2 } from "node:crypto";
 import { existsSync as existsSync3, mkdirSync, readFileSync as readFileSync3, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -9,7 +10,8 @@ import path4 from "node:path";
 // ../../packages/review-core/src/index.ts
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync2, readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync2, mkdtempSync, readFileSync as readFileSync2, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path2 from "node:path";
 
 // ../../packages/review-core/src/context.ts
@@ -734,8 +736,7 @@ function buildReviewRequest(options) {
     }
   };
 }
-function findQwenBinary(cwd) {
-  const candidates = ["qwen", "qwen-code", "qwen-code-cli"];
+function findBinary(cwd, candidates) {
   for (const candidate of candidates) {
     if (tryRun(candidate, ["--version"], cwd)) {
       return candidate;
@@ -743,20 +744,50 @@ function findQwenBinary(cwd) {
   }
   return null;
 }
-function hasHeadlessAuthConfig() {
-  return Boolean(
-    process.env.OPENAI_API_KEY || process.env.QWEN_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.ANTHROPIC_API_KEY
-  );
+function findQwenBinary(cwd) {
+  return findBinary(cwd, ["qwen", "qwen-code", "qwen-code-cli"]);
 }
-function shouldUseQwenRuntime(cwd) {
+function findCodexBinary(cwd) {
+  return findBinary(cwd, ["codex"]);
+}
+function detectLocalApiKeySource() {
+  const candidates = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "QWEN_API_KEY", "DASHSCOPE_API_KEY"];
+  for (const candidate of candidates) {
+    if (process.env[candidate]?.trim()) {
+      return candidate;
+    }
+  }
+  return null;
+}
+function hasCodexAuthConfig(cwd) {
+  const loginStatus = tryRun("codex", ["login", "status"], cwd);
+  return Boolean(loginStatus && loginStatus.toLowerCase().startsWith("logged in"));
+}
+function hasHeadlessAuthConfig() {
+  return Boolean(detectLocalApiKeySource());
+}
+function shouldUseCodexRuntime(cwd, provider) {
+  const forcedMode = process.env.DIFFMINT_REVIEW_RUNTIME;
+  if (forcedMode === "scaffold" || forcedMode === "qwen") {
+    return false;
+  }
+  if (forcedMode === "codex") {
+    return Boolean(findCodexBinary(cwd) && hasCodexAuthConfig(cwd));
+  }
+  return provider === "codex" && Boolean(findCodexBinary(cwd) && hasCodexAuthConfig(cwd));
+}
+function shouldUseQwenRuntime(cwd, provider) {
   const forcedMode = process.env.DIFFMINT_REVIEW_RUNTIME;
   if (forcedMode === "scaffold") {
+    return false;
+  }
+  if (forcedMode === "codex") {
     return false;
   }
   if (forcedMode === "qwen") {
     return Boolean(findQwenBinary(cwd));
   }
-  return Boolean(findQwenBinary(cwd) && hasHeadlessAuthConfig());
+  return Boolean(provider?.startsWith("qwen") && findQwenBinary(cwd) && hasHeadlessAuthConfig());
 }
 function extractAssistantTextFromQwenPayload(payload) {
   if (!Array.isArray(payload)) {
@@ -817,6 +848,32 @@ function normalizeFindingFromQwen(value) {
     suggestedAction: typeof candidate.suggestedAction === "string" ? candidate.suggestedAction : void 0
   };
 }
+function parseStructuredReviewText(rawText, rawOutput, options) {
+  const embeddedJson = extractJsonObject(rawText);
+  if (!embeddedJson) {
+    const summary2 = rawText.trim();
+    if (!summary2) {
+      return null;
+    }
+    return {
+      findings: [],
+      summary: `${options.nonJsonSummaryPrefix} ${summary2}`.trim(),
+      durationMs: 1e3,
+      rawOutput,
+      artifactLabel: options.artifactLabel
+    };
+  }
+  const reviewPayload = JSON.parse(embeddedJson);
+  const findings = reviewPayload.findings?.map((finding) => normalizeFindingFromQwen(finding)).filter((finding) => Boolean(finding)) ?? [];
+  const summary = typeof reviewPayload.summary === "string" && reviewPayload.summary.trim().length > 0 ? reviewPayload.summary.trim() : findings.length === 0 ? options.emptySummary : `${options.nonJsonSummaryPrefix} ${findings.length} structured findings.`.trim();
+  return {
+    findings,
+    summary,
+    durationMs: 1e3,
+    rawOutput,
+    artifactLabel: options.artifactLabel
+  };
+}
 function parseQwenHeadlessOutput(rawOutput) {
   try {
     const payload = JSON.parse(rawOutput);
@@ -824,27 +881,21 @@ function parseQwenHeadlessOutput(rawOutput) {
     if (!assistantText) {
       return null;
     }
-    const embeddedJson = extractJsonObject(assistantText);
-    if (!embeddedJson) {
-      return {
-        findings: [],
-        summary: assistantText.trim(),
-        durationMs: 1e3,
-        rawOutput
-      };
-    }
-    const reviewPayload = JSON.parse(embeddedJson);
-    const findings = reviewPayload.findings?.map((finding) => normalizeFindingFromQwen(finding)).filter((finding) => Boolean(finding)) ?? [];
-    const summary = typeof reviewPayload.summary === "string" && reviewPayload.summary.trim().length > 0 ? reviewPayload.summary.trim() : findings.length === 0 ? "Qwen completed the headless review with no structured findings." : `Qwen completed the headless review with ${findings.length} structured findings.`;
-    return {
-      findings,
-      summary,
-      durationMs: 1e3,
-      rawOutput
-    };
+    return parseStructuredReviewText(assistantText, rawOutput, {
+      emptySummary: "Qwen completed the headless review with no structured findings.",
+      nonJsonSummaryPrefix: "Qwen completed the headless review with",
+      artifactLabel: "Qwen Headless Output"
+    });
   } catch {
     return null;
   }
+}
+function parseCodexHeadlessOutput(rawOutput) {
+  return parseStructuredReviewText(rawOutput, rawOutput, {
+    emptySummary: "Codex completed the headless review with no structured findings.",
+    nonJsonSummaryPrefix: "Codex completed the headless review with",
+    artifactLabel: "Codex Exec Output"
+  });
 }
 function runQwenHeadlessReview(request, options) {
   const cwd = options.cwd ?? request.metadata.cwd;
@@ -881,6 +932,52 @@ function runQwenHeadlessReview(request, options) {
     };
   } catch {
     return null;
+  }
+}
+function runCodexHeadlessReview(request, options) {
+  const cwd = options.cwd ?? request.metadata.cwd;
+  const codexBinary = findCodexBinary(cwd);
+  if (!codexBinary || !hasCodexAuthConfig(cwd)) {
+    return null;
+  }
+  const outputDir = mkdtempSync(path2.join(tmpdir(), "diffmint-codex-"));
+  const lastMessagePath = path2.join(outputDir, "last-message.txt");
+  const startedAt = Date.now();
+  try {
+    execFileSync(
+      codexBinary,
+      [
+        "exec",
+        "--skip-git-repo-check",
+        "--color",
+        "never",
+        "--output-last-message",
+        lastMessagePath,
+        ...options.model ?? request.metadata.model ? ["--model", options.model ?? request.metadata.model ?? "gpt-5-codex"] : [],
+        "-"
+      ],
+      {
+        cwd,
+        encoding: "utf8",
+        input: buildHeadlessReviewPrompt(request, options.policy),
+        stdio: ["pipe", "pipe", "pipe"]
+      }
+    );
+    if (!existsSync2(lastMessagePath)) {
+      return null;
+    }
+    const parsed = parseCodexHeadlessOutput(readFileSync2(lastMessagePath, "utf8"));
+    if (!parsed) {
+      return null;
+    }
+    return {
+      ...parsed,
+      durationMs: Math.max(Date.now() - startedAt, 1)
+    };
+  } catch {
+    return null;
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true });
   }
 }
 function createFindingsFromRequest(request) {
@@ -986,7 +1083,60 @@ function createReviewSession(request) {
 }
 async function createReviewSessionWithRuntime(request, options = {}) {
   const cwd = options.cwd ?? request.metadata.cwd;
-  if (!shouldUseQwenRuntime(cwd)) {
+  const requestedProvider = options.provider ?? request.metadata.provider;
+  if (shouldUseCodexRuntime(cwd, requestedProvider)) {
+    const runtimeResult2 = runCodexHeadlessReview(request, options);
+    if (runtimeResult2) {
+      const diffFiles2 = parseDiffFiles(request.diff);
+      const findings2 = runtimeResult2.findings.map(
+        (finding) => enrichFindingLocation(finding, request, diffFiles2)
+      );
+      const startedAt2 = (/* @__PURE__ */ new Date()).toISOString();
+      const completedAt2 = (/* @__PURE__ */ new Date()).toISOString();
+      const context2 = request.metadata.context ?? buildReviewContextSummary(request);
+      return {
+        id: randomUUID(),
+        traceId: request.traceId,
+        requestId: request.id,
+        source: request.source,
+        commandSource: request.commandSource,
+        provider: requestedProvider ?? "codex",
+        model: options.model ?? request.metadata.model ?? "gpt-5-codex",
+        policyVersionId: request.policyVersionId,
+        status: "completed",
+        findings: findings2,
+        context: context2,
+        convention: request.metadata.convention,
+        summary: runtimeResult2.summary,
+        severityCounts: {
+          low: countSeverity2(findings2, "low"),
+          medium: countSeverity2(findings2, "medium"),
+          high: countSeverity2(findings2, "high"),
+          critical: countSeverity2(findings2, "critical")
+        },
+        durationMs: runtimeResult2.durationMs,
+        startedAt: startedAt2,
+        completedAt: completedAt2,
+        artifacts: [
+          {
+            id: randomUUID(),
+            kind: "terminal",
+            label: "Terminal Summary",
+            mimeType: "text/plain",
+            content: renderTerminalSession(request, findings2)
+          },
+          {
+            id: randomUUID(),
+            kind: "raw-provider-output",
+            label: runtimeResult2.artifactLabel,
+            mimeType: "application/json",
+            content: runtimeResult2.rawOutput
+          }
+        ]
+      };
+    }
+  }
+  if (!shouldUseQwenRuntime(cwd, requestedProvider)) {
     return createReviewSession(request);
   }
   const runtimeResult = runQwenHeadlessReview(request, options);
@@ -1034,7 +1184,7 @@ async function createReviewSessionWithRuntime(request, options = {}) {
       {
         id: randomUUID(),
         kind: "raw-provider-output",
-        label: "Qwen Headless Output",
+        label: runtimeResult.artifactLabel,
         mimeType: "application/json",
         content: runtimeResult.rawOutput
       }
@@ -1063,7 +1213,11 @@ function sanitizeReviewSessionForCloudSync(session, options = {}) {
 }
 function runDoctor(cwd) {
   const gitVersion = tryRun("git", ["--version"], cwd);
+  const codexVersion = tryRun("codex", ["--version"], cwd);
+  const codexLoginStatus = codexVersion ? tryRun("codex", ["login", "status"], cwd) : null;
+  const antigravityVersion = tryRun("antigravity", ["--version"], cwd);
   const qwenVersion = tryRun("qwen", ["--version"], cwd) ?? tryRun("qwen-code", ["--version"], cwd) ?? tryRun("qwen-code-cli", ["--version"], cwd);
+  const apiKeySource = detectLocalApiKeySource();
   return [
     {
       id: "git",
@@ -1072,10 +1226,28 @@ function runDoctor(cwd) {
       detail: gitVersion ?? "Git is not available in PATH."
     },
     {
+      id: "codex",
+      label: "Codex",
+      status: codexVersion && codexLoginStatus?.toLowerCase().startsWith("logged in") ? "ok" : "warn",
+      detail: codexVersion ? `${codexVersion}${codexLoginStatus ? ` \xB7 ${codexLoginStatus}` : " \xB7 run `codex login`"}` : "Codex CLI was not detected. Install Codex or keep Diffmint in scaffold mode."
+    },
+    {
+      id: "antigravity",
+      label: "Antigravity",
+      status: antigravityVersion ? "ok" : "warn",
+      detail: antigravityVersion ? `${antigravityVersion} \xB7 local desktop auth can stay on the user machine.` : "Antigravity was not detected. Local desktop BYOK flow is unavailable."
+    },
+    {
       id: "qwen",
       label: "Qwen Code",
       status: qwenVersion ? "ok" : "warn",
       detail: qwenVersion ?? "Qwen Code was not detected. Review runs will stay in scaffold mode."
+    },
+    {
+      id: "api-key",
+      label: "Local API key",
+      status: apiKeySource ? "ok" : "warn",
+      detail: apiKeySource ? `${apiKeySource} detected. Diffmint does not store provider keys on the server.` : "No local API key detected. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, QWEN_API_KEY, or DASHSCOPE_API_KEY for BYOK API mode."
     },
     {
       id: "api",
@@ -1177,7 +1349,15 @@ function renderCliHelp() {
     "",
     "Auth",
     "  dm auth login",
+    "  dm auth login remote",
+    "  dm auth login codex",
+    "  dm auth login antigravity",
+    "  dm auth login api",
     "  dm auth logout",
+    "",
+    "Provider Config",
+    "  dm config set-provider codex",
+    "  dm config set-model gpt-5-codex",
     "",
     "Review",
     "  dm review",
@@ -1192,7 +1372,7 @@ function renderCliHelp() {
     "Diagnostics",
     "  dm history",
     "  dm history --json",
-    "  dm history --provider qwen --query auth",
+    "  dm history --provider codex --query auth",
     "  dm history --compare latest previous",
     "  dm doctor",
     "  dm doctor --json",
@@ -1204,6 +1384,9 @@ function renderCliHelp() {
     "Examples",
     "  dm review --base origin/main --mode security",
     "  dm review --files apps/cli/src/index.ts --markdown",
+    "  dm auth login codex",
+    "  dm auth login api OPENAI_API_KEY",
+    "  dm config set-model claude-sonnet-4-5",
     "  dm history --json",
     "  dm history --compare latest previous",
     "  dm doctor --json"
@@ -1340,6 +1523,174 @@ var CLI_VERSION = (() => {
     return "0.1.0";
   }
 })();
+function tryExec(command, args, cwd = process.cwd()) {
+  try {
+    return execFileSync2(command, args, {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+function detectLocalApiKeySource2() {
+  const candidates = ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "QWEN_API_KEY", "DASHSCOPE_API_KEY"];
+  return candidates.find((candidate) => process.env[candidate]?.trim());
+}
+function getDefaultModelForProvider(provider) {
+  if (provider === "codex") {
+    return "gpt-5-codex";
+  }
+  if (provider === "antigravity") {
+    return "antigravity-agent";
+  }
+  if (provider === "api" || provider === "openai-compatible" || provider === "anthropic-compatible") {
+    return "user-configured";
+  }
+  if (provider?.startsWith("qwen")) {
+    return "qwen-code";
+  }
+  return "user-configured";
+}
+function inferProviderAuthMode(provider, fallback = "api") {
+  if (provider === "codex") {
+    return "codex";
+  }
+  if (provider === "antigravity") {
+    return "antigravity";
+  }
+  if (provider === "api" || provider === "openai-compatible" || provider === "anthropic-compatible") {
+    return "api";
+  }
+  return fallback;
+}
+function resolveModelForProvider(config, provider) {
+  const previousDefault = getDefaultModelForProvider(config.provider);
+  const nextDefault = getDefaultModelForProvider(provider);
+  if (!config.model || config.model === previousDefault) {
+    return nextDefault;
+  }
+  return config.model;
+}
+function hasCodexLogin(cwd = process.cwd()) {
+  const loginStatus = tryExec("codex", ["login", "status"], cwd);
+  return Boolean(loginStatus && loginStatus.toLowerCase().startsWith("logged in"));
+}
+function hasAntigravityBinary(cwd = process.cwd()) {
+  return Boolean(tryExec("antigravity", ["--version"], cwd));
+}
+function hasRemoteControlPlaneSession(config) {
+  return Boolean(config.workspace && config.lastDeviceCode);
+}
+function buildDefaultSyncDefaults(config) {
+  return config.syncDefaults ?? {
+    cloudSyncEnabled: hasRemoteControlPlaneSession(config),
+    localOnlyDefault: !hasRemoteControlPlaneSession(config),
+    redactionEnabled: true
+  };
+}
+function getEffectiveProviderSelection(config) {
+  if (config.provider) {
+    return {
+      provider: config.provider,
+      model: config.model ?? getDefaultModelForProvider(config.provider),
+      providerAuthMode: config.providerAuthMode ?? inferProviderAuthMode(config.provider),
+      providerApiKeyEnvVar: config.providerApiKeyEnvVar ?? (inferProviderAuthMode(config.provider) === "api" ? detectLocalApiKeySource2() : void 0)
+    };
+  }
+  if (hasCodexLogin()) {
+    return {
+      provider: "codex",
+      model: config.model ?? getDefaultModelForProvider("codex"),
+      providerAuthMode: "codex"
+    };
+  }
+  const apiKeyEnvVar = detectLocalApiKeySource2();
+  if (apiKeyEnvVar) {
+    return {
+      provider: "api",
+      model: config.model ?? getDefaultModelForProvider("api"),
+      providerAuthMode: "api",
+      providerApiKeyEnvVar: apiKeyEnvVar
+    };
+  }
+  if (hasAntigravityBinary()) {
+    return {
+      provider: "antigravity",
+      model: config.model ?? getDefaultModelForProvider("antigravity"),
+      providerAuthMode: "antigravity"
+    };
+  }
+  const provider = config.provider ?? "api";
+  return {
+    provider,
+    model: config.model ?? getDefaultModelForProvider(provider),
+    providerAuthMode: config.providerAuthMode ?? inferProviderAuthMode(provider),
+    providerApiKeyEnvVar: config.providerApiKeyEnvVar
+  };
+}
+function buildConfiguredLocalConfig(config, selection) {
+  return {
+    ...config,
+    apiBaseUrl: getApiBaseUrl(config),
+    workspace: config.workspace ?? {
+      id: "ws_local",
+      name: "Local Workspace"
+    },
+    provider: selection.provider,
+    model: selection.model,
+    providerAuthMode: selection.providerAuthMode,
+    providerApiKeyEnvVar: selection.providerApiKeyEnvVar,
+    syncDefaults: buildDefaultSyncDefaults(config),
+    signedInAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
+function buildCodexLocalConfig(config) {
+  const codexVersion = tryExec("codex", ["--version"]);
+  if (!codexVersion) {
+    throw new Error(
+      "Codex CLI was not detected. Install Codex before running `dm auth login codex`."
+    );
+  }
+  if (!hasCodexLogin()) {
+    throw new Error("Codex CLI is installed but not authenticated. Run `codex login` first.");
+  }
+  return buildConfiguredLocalConfig(config, {
+    provider: "codex",
+    model: config.provider === "codex" ? config.model ?? "gpt-5-codex" : "gpt-5-codex",
+    providerAuthMode: "codex"
+  });
+}
+function buildAntigravityLocalConfig(config) {
+  if (!hasAntigravityBinary()) {
+    throw new Error(
+      "Antigravity was not detected. Install Antigravity before running `dm auth login antigravity`."
+    );
+  }
+  return buildConfiguredLocalConfig(config, {
+    provider: "antigravity",
+    model: config.provider === "antigravity" ? config.model ?? "antigravity-agent" : "antigravity-agent",
+    providerAuthMode: "antigravity"
+  });
+}
+function buildApiLocalConfig(config, explicitEnvVar) {
+  const apiKeyEnvVar = explicitEnvVar ?? detectLocalApiKeySource2();
+  if (!apiKeyEnvVar) {
+    throw new Error(
+      "No local API key detected. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, QWEN_API_KEY, or DASHSCOPE_API_KEY before running `dm auth login api`."
+    );
+  }
+  if (!process.env[apiKeyEnvVar]?.trim()) {
+    throw new Error(`Environment variable ${apiKeyEnvVar} is not set.`);
+  }
+  return buildConfiguredLocalConfig(config, {
+    provider: "api",
+    model: config.provider === "api" ? config.model ?? "user-configured" : "user-configured",
+    providerAuthMode: "api",
+    providerApiKeyEnvVar: apiKeyEnvVar
+  });
+}
 function ensureHome() {
   mkdirSync(DIFFMINT_HOME, { recursive: true });
 }
@@ -1624,6 +1975,9 @@ async function tryRemoteLogin(config) {
     ...config,
     apiBaseUrl,
     provider: bootstrap.provider.provider,
+    model: bootstrap.provider.defaultModel,
+    providerAuthMode: "remote",
+    providerApiKeyEnvVar: void 0,
     role: bootstrap.role,
     policyVersionId: bootstrap.policy.policyVersionId,
     workspace: {
@@ -1639,16 +1993,7 @@ async function tryRemoteLogin(config) {
   return nextConfig;
 }
 function buildLocalFallbackConfig(config) {
-  return {
-    ...config,
-    apiBaseUrl: getApiBaseUrl(config),
-    workspace: config.workspace ?? {
-      id: "ws_local",
-      name: "Local Workspace"
-    },
-    provider: config.provider ?? "qwen",
-    signedInAt: (/* @__PURE__ */ new Date()).toISOString()
-  };
+  return buildConfiguredLocalConfig(config, getEffectiveProviderSelection(config));
 }
 function buildSyncQueueEntries(config, session) {
   if (!config.workspace) {
@@ -1684,7 +2029,7 @@ function buildSyncQueueEntries(config, session) {
 }
 async function flushSyncQueue(config) {
   const queuedEntries = readSyncQueue();
-  if (queuedEntries.length === 0 || !config.workspace || config.syncDefaults?.cloudSyncEnabled === false) {
+  if (queuedEntries.length === 0 || !config.workspace || !hasRemoteControlPlaneSession(config) || config.syncDefaults?.cloudSyncEnabled === false) {
     return {
       flushed: 0,
       remaining: queuedEntries.length
@@ -1719,7 +2064,7 @@ async function flushSyncQueue(config) {
   };
 }
 async function syncReviewToCloud(config, session) {
-  if (!config.workspace || config.syncDefaults?.cloudSyncEnabled === false) {
+  if (!config.workspace || !hasRemoteControlPlaneSession(config) || config.syncDefaults?.cloudSyncEnabled === false) {
     return {
       flushed: 0,
       queued: false,
@@ -1766,7 +2111,7 @@ async function syncReviewToCloud(config, session) {
   };
 }
 async function loadHistory(config) {
-  if (!config.workspace) {
+  if (!config.workspace || !hasRemoteControlPlaneSession(config)) {
     return readHistory();
   }
   try {
@@ -1786,13 +2131,25 @@ async function extendDoctorOutput(config) {
   const checks = runDoctor(process.cwd());
   const queueSize = getSyncQueueSize();
   const convention = inspectReviewConvention(process.cwd());
+  const providerSelection = getEffectiveProviderSelection(config);
   const extendedChecks = [
     ...checks,
     {
       id: "config",
       label: "Local config",
       status: config.signedInAt ? "ok" : "warn",
-      detail: config.signedInAt ? `Signed in to ${config.workspace?.name ?? "unknown workspace"}` : "Run `dm auth login` to connect a workspace."
+      detail: config.signedInAt ? `Signed in to ${config.workspace?.name ?? "unknown workspace"}` : "Run `dm auth login`, `dm auth login codex`, `dm auth login antigravity`, or `dm auth login api`."
+    },
+    {
+      id: "selected-provider",
+      label: "Selected provider",
+      status: providerSelection.provider ? "ok" : "warn",
+      detail: [
+        `Provider ${providerSelection.provider}`,
+        `mode ${providerSelection.providerAuthMode}`,
+        `model ${providerSelection.model}`,
+        providerSelection.providerApiKeyEnvVar ? `key ${providerSelection.providerApiKeyEnvVar}` : void 0
+      ].filter(Boolean).join(" \xB7 ")
     },
     {
       id: "sync-queue",
@@ -1807,7 +2164,7 @@ async function extendDoctorOutput(config) {
       detail: convention.detail
     }
   ];
-  if (!config.apiBaseUrl) {
+  if (!config.apiBaseUrl || !hasRemoteControlPlaneSession(config)) {
     return extendedChecks;
   }
   try {
@@ -1842,17 +2199,36 @@ async function main() {
   }
   if (command === "auth" && subcommand === "login") {
     const config = readConfig();
+    const loginMode = rest[0];
     let nextConfig;
-    try {
-      nextConfig = await tryRemoteLogin(config);
-    } catch (error) {
-      nextConfig = buildLocalFallbackConfig(config);
+    if (loginMode && loginMode !== "remote" && loginMode !== "codex" && loginMode !== "antigravity" && loginMode !== "api") {
+      throw new Error(`Unknown login mode "${loginMode}".`);
+    }
+    if (loginMode === "codex") {
+      nextConfig = buildCodexLocalConfig(config);
+      console.log("Configured local Codex auth. Diffmint will keep provider auth on this machine.");
+    } else if (loginMode === "antigravity") {
+      nextConfig = buildAntigravityLocalConfig(config);
       console.log(
-        `Control plane login unavailable, using local fallback: ${error instanceof Error ? error.message : String(error)}`
+        "Configured local Antigravity auth. Diffmint will keep provider auth on this machine."
       );
+    } else if (loginMode === "api") {
+      nextConfig = buildApiLocalConfig(config, rest[1]);
+      console.log(
+        "Configured local API-key auth. Diffmint will keep provider keys on this machine only."
+      );
+    } else {
+      try {
+        nextConfig = await tryRemoteLogin(config);
+      } catch (error) {
+        nextConfig = buildLocalFallbackConfig(config);
+        console.log(
+          `Control plane login unavailable, using local fallback: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
     }
     writeConfig(nextConfig);
-    if (nextConfig.workspace && nextConfig.syncDefaults?.cloudSyncEnabled !== false) {
+    if (nextConfig.workspace && nextConfig.syncDefaults?.cloudSyncEnabled !== false && hasRemoteControlPlaneSession(nextConfig)) {
       const flushResult = await flushSyncQueue(nextConfig);
       if (flushResult.flushed > 0) {
         console.log(`Flushed ${flushResult.flushed} queued sync item(s).`);
@@ -1869,6 +2245,15 @@ async function main() {
     }
     if (nextConfig.provider) {
       console.log(`Provider: ${nextConfig.provider}`);
+    }
+    if (nextConfig.model) {
+      console.log(`Model: ${nextConfig.model}`);
+    }
+    if (nextConfig.providerAuthMode) {
+      console.log(`Auth mode: ${nextConfig.providerAuthMode}`);
+    }
+    if (nextConfig.providerApiKeyEnvVar) {
+      console.log(`API key env: ${nextConfig.providerApiKeyEnvVar}`);
     }
     return;
   }
@@ -1899,13 +2284,30 @@ async function main() {
     const config = readConfig();
     writeConfig({
       ...config,
-      provider
+      provider,
+      model: resolveModelForProvider(config, provider),
+      providerAuthMode: inferProviderAuthMode(provider, config.providerAuthMode),
+      providerApiKeyEnvVar: inferProviderAuthMode(provider, config.providerAuthMode) === "api" ? config.providerApiKeyEnvVar ?? detectLocalApiKeySource2() : void 0
     });
     console.log(`Provider set to ${provider}.`);
     return;
   }
+  if (command === "config" && subcommand === "set-model") {
+    const model = rest[0];
+    if (!model) {
+      throw new Error("Expected a model name.");
+    }
+    const config = readConfig();
+    writeConfig({
+      ...config,
+      model
+    });
+    console.log(`Model set to ${model}.`);
+    return;
+  }
   if (command === "review") {
     const config = readConfig();
+    const providerSelection = getEffectiveProviderSelection(config);
     const flags = parseFlags([subcommand, ...rest].filter(Boolean));
     const source = flags.files.length > 0 ? "selected_files" : flags.baseRef ? "branch_compare" : "local_diff";
     const policy = config.policyVersionId ? {
@@ -1928,16 +2330,16 @@ async function main() {
       staged: flags.staged,
       outputFormat: flags.json ? "json" : flags.markdown ? "markdown" : "terminal",
       mode: flags.mode,
-      localOnly: config.syncDefaults?.localOnlyDefault ?? false,
-      cloudSyncEnabled: config.syncDefaults?.cloudSyncEnabled ?? Boolean(config.workspace),
-      provider: config.provider ?? "qwen",
-      model: "qwen-code",
+      localOnly: config.syncDefaults?.localOnlyDefault ?? !hasRemoteControlPlaneSession(config),
+      cloudSyncEnabled: config.syncDefaults?.cloudSyncEnabled ?? hasRemoteControlPlaneSession(config),
+      provider: providerSelection.provider,
+      model: providerSelection.model,
       policy
     });
     const session = await createReviewSessionWithRuntime(request, {
       cwd: process.cwd(),
-      provider: config.provider ?? "qwen",
-      model: "qwen-code",
+      provider: providerSelection.provider,
+      model: providerSelection.model,
       policy
     });
     appendHistory(session);

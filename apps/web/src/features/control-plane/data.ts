@@ -63,13 +63,30 @@ export const workspaceSyncDefaults: WorkspaceBootstrap['syncDefaults'] = {
 
 export const providerSummaries: ProviderConfigSummary[] = [
   {
-    id: 'provider-managed-qwen',
-    provider: 'qwen',
-    mode: 'managed',
-    defaultModel: 'qwen-code',
-    allowedModels: ['qwen-code'],
-    rateLimitPerMinute: 60,
-    encrypted: true,
+    id: 'provider-byok-codex',
+    provider: 'codex',
+    mode: 'byok',
+    defaultModel: 'gpt-5-codex',
+    allowedModels: ['gpt-5-codex', 'gpt-5.4', 'gpt-5.4-mini'],
+    encrypted: false,
+    updatedAt: '2026-04-13T00:00:00.000Z'
+  },
+  {
+    id: 'provider-byok-antigravity',
+    provider: 'antigravity',
+    mode: 'byok',
+    defaultModel: 'antigravity-agent',
+    allowedModels: ['antigravity-agent'],
+    encrypted: false,
+    updatedAt: '2026-04-13T00:00:00.000Z'
+  },
+  {
+    id: 'provider-byok-api',
+    provider: 'api',
+    mode: 'byok',
+    defaultModel: 'user-configured',
+    allowedModels: ['user-configured'],
+    encrypted: false,
     updatedAt: '2026-04-13T00:00:00.000Z'
   }
 ];
@@ -116,7 +133,7 @@ export const overviewStats: OverviewStat[] = [
   },
   {
     label: 'Quota remaining',
-    value: '0%',
-    helper: 'No managed quota assigned'
+    value: 'BYOK',
+    helper: 'No hosted provider credits'
   }
 ];

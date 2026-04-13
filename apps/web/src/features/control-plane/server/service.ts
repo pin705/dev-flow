@@ -333,7 +333,7 @@ function buildOverviewStats(
   const quotaPercent =
     billing.creditsIncluded > 0
       ? `${calculateQuotaRemainingPercent(billing.creditsRemaining, billing.creditsIncluded)}%`
-      : '0%';
+      : 'BYOK';
 
   return [
     {
@@ -360,7 +360,8 @@ function buildOverviewStats(
     {
       label: 'Quota remaining',
       value: quotaPercent,
-      helper: billing.creditsIncluded > 0 ? 'Managed provider credits' : 'No managed quota assigned'
+      helper:
+        billing.creditsIncluded > 0 ? 'User-funded provider quota' : 'No hosted provider credits'
     }
   ];
 }

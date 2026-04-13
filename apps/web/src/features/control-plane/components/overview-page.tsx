@@ -154,7 +154,8 @@ export function ControlPlaneOverviewPage({
           <CardHeader>
             <CardTitle>Provider posture</CardTitle>
             <CardDescription>
-              Managed and BYOK strategies can coexist within the same workspace.
+              Market-test mode keeps provider auth on the user machine instead of storing API keys
+              in Diffmint.
             </CardDescription>
           </CardHeader>
           <CardContent className='space-y-3'>
@@ -172,7 +173,9 @@ export function ControlPlaneOverviewPage({
                         {provider.mode} · default model {provider.defaultModel}
                       </p>
                     </div>
-                    <Badge variant='outline'>{provider.rateLimitPerMinute}/min</Badge>
+                    <Badge variant='outline'>
+                      {provider.rateLimitPerMinute ? `${provider.rateLimitPerMinute}/min` : 'BYOK'}
+                    </Badge>
                   </div>
                 </div>
               ))

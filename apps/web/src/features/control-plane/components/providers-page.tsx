@@ -32,7 +32,7 @@ export function ProvidersPageContent({ providerSummaries }: ProvidersPageContent
                 <CardDescription>
                   {provider.mode === 'managed'
                     ? 'Managed by the Diffmint platform'
-                    : 'Workspace-supplied provider credentials'}
+                    : 'User-supplied local credentials. Diffmint does not store the provider key.'}
                 </CardDescription>
               </CardHeader>
               <CardContent className='space-y-3 text-sm'>
@@ -46,11 +46,17 @@ export function ProvidersPageContent({ providerSummaries }: ProvidersPageContent
                 </div>
                 <div className='flex items-center justify-between'>
                   <span className='text-muted-foreground'>Rate limit</span>
-                  <span>{provider.rateLimitPerMinute}/min</span>
+                  <span>
+                    {provider.rateLimitPerMinute
+                      ? `${provider.rateLimitPerMinute}/min`
+                      : 'User-controlled'}
+                  </span>
                 </div>
                 <div className='flex items-center justify-between'>
                   <span className='text-muted-foreground'>Secret handling</span>
-                  <span>{provider.encrypted ? 'Encrypted at rest' : 'Unconfigured'}</span>
+                  <span>
+                    {provider.encrypted ? 'Encrypted at rest' : 'Kept on the user machine only'}
+                  </span>
                 </div>
               </CardContent>
             </Card>
@@ -62,7 +68,7 @@ export function ProvidersPageContent({ providerSummaries }: ProvidersPageContent
         <CardHeader>
           <CardTitle>Allowed model matrix</CardTitle>
           <CardDescription>
-            Use workspace rules to keep supported providers and models explicit.
+            Keep supported local providers and model families explicit before broader rollout.
           </CardDescription>
         </CardHeader>
         <CardContent>

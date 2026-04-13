@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -37,6 +38,9 @@ import {
 interface LocalConfig {
   apiBaseUrl?: string;
   provider?: string;
+  model?: string;
+  providerAuthMode?: 'remote' | 'codex' | 'antigravity' | 'api';
+  providerApiKeyEnvVar?: string;
   workspace?: {
     id: string;
     name: string;
@@ -47,6 +51,13 @@ interface LocalConfig {
   syncDefaults?: WorkspaceBootstrap['syncDefaults'];
   lastDeviceCode?: string;
   signedInAt?: string;
+}
+
+interface LocalProviderSelection {
+  provider: string;
+  model: string;
+  providerAuthMode: NonNullable<LocalConfig['providerAuthMode']>;
+  providerApiKeyEnvVar?: string;
 }
 
 interface SyncQueueEntry {
@@ -69,6 +80,229 @@ const CLI_VERSION = (() => {
     return '0.1.0';
   }
 })();
+
+function tryExec(command: string, args: string[], cwd = process.cwd()): string | null {
+  try {
+    return execFileSync(command, args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore']
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+function detectLocalApiKeySource(): string | undefined {
+  const candidates = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'QWEN_API_KEY', 'DASHSCOPE_API_KEY'];
+
+  return candidates.find((candidate) => process.env[candidate]?.trim());
+}
+
+function getDefaultModelForProvider(provider?: string): string {
+  if (provider === 'codex') {
+    return 'gpt-5-codex';
+  }
+
+  if (provider === 'antigravity') {
+    return 'antigravity-agent';
+  }
+
+  if (
+    provider === 'api' ||
+    provider === 'openai-compatible' ||
+    provider === 'anthropic-compatible'
+  ) {
+    return 'user-configured';
+  }
+
+  if (provider?.startsWith('qwen')) {
+    return 'qwen-code';
+  }
+
+  return 'user-configured';
+}
+
+function inferProviderAuthMode(
+  provider?: string,
+  fallback: LocalConfig['providerAuthMode'] = 'api'
+): LocalConfig['providerAuthMode'] {
+  if (provider === 'codex') {
+    return 'codex';
+  }
+
+  if (provider === 'antigravity') {
+    return 'antigravity';
+  }
+
+  if (
+    provider === 'api' ||
+    provider === 'openai-compatible' ||
+    provider === 'anthropic-compatible'
+  ) {
+    return 'api';
+  }
+
+  return fallback;
+}
+
+function resolveModelForProvider(config: LocalConfig, provider: string): string {
+  const previousDefault = getDefaultModelForProvider(config.provider);
+  const nextDefault = getDefaultModelForProvider(provider);
+
+  if (!config.model || config.model === previousDefault) {
+    return nextDefault;
+  }
+
+  return config.model;
+}
+
+function hasCodexLogin(cwd = process.cwd()): boolean {
+  const loginStatus = tryExec('codex', ['login', 'status'], cwd);
+  return Boolean(loginStatus && loginStatus.toLowerCase().startsWith('logged in'));
+}
+
+function hasAntigravityBinary(cwd = process.cwd()): boolean {
+  return Boolean(tryExec('antigravity', ['--version'], cwd));
+}
+
+function hasRemoteControlPlaneSession(config: LocalConfig): boolean {
+  return Boolean(config.workspace && config.lastDeviceCode);
+}
+
+function buildDefaultSyncDefaults(config: LocalConfig): NonNullable<LocalConfig['syncDefaults']> {
+  return (
+    config.syncDefaults ?? {
+      cloudSyncEnabled: hasRemoteControlPlaneSession(config),
+      localOnlyDefault: !hasRemoteControlPlaneSession(config),
+      redactionEnabled: true
+    }
+  );
+}
+
+function getEffectiveProviderSelection(config: LocalConfig): LocalProviderSelection {
+  if (config.provider && config.model && config.providerAuthMode) {
+    return {
+      provider: config.provider,
+      model: config.model,
+      providerAuthMode: config.providerAuthMode,
+      providerApiKeyEnvVar: config.providerApiKeyEnvVar
+    };
+  }
+
+  if (hasCodexLogin()) {
+    return {
+      provider: 'codex',
+      model: config.model ?? getDefaultModelForProvider('codex'),
+      providerAuthMode: 'codex'
+    };
+  }
+
+  const apiKeyEnvVar = detectLocalApiKeySource();
+  if (apiKeyEnvVar) {
+    return {
+      provider: 'api',
+      model: config.model ?? getDefaultModelForProvider('api'),
+      providerAuthMode: 'api',
+      providerApiKeyEnvVar: apiKeyEnvVar
+    };
+  }
+
+  if (hasAntigravityBinary()) {
+    return {
+      provider: 'antigravity',
+      model: config.model ?? getDefaultModelForProvider('antigravity'),
+      providerAuthMode: 'antigravity'
+    };
+  }
+
+  const provider = config.provider ?? 'api';
+
+  return {
+    provider,
+    model: config.model ?? getDefaultModelForProvider(provider),
+    providerAuthMode: config.providerAuthMode ?? inferProviderAuthMode(provider),
+    providerApiKeyEnvVar: config.providerApiKeyEnvVar
+  };
+}
+
+function buildConfiguredLocalConfig(
+  config: LocalConfig,
+  selection: LocalProviderSelection
+): LocalConfig {
+  return {
+    ...config,
+    apiBaseUrl: getApiBaseUrl(config),
+    workspace: config.workspace ?? {
+      id: 'ws_local',
+      name: 'Local Workspace'
+    },
+    provider: selection.provider,
+    model: selection.model,
+    providerAuthMode: selection.providerAuthMode,
+    providerApiKeyEnvVar: selection.providerApiKeyEnvVar,
+    syncDefaults: buildDefaultSyncDefaults(config),
+    signedInAt: new Date().toISOString()
+  };
+}
+
+function buildCodexLocalConfig(config: LocalConfig): LocalConfig {
+  const codexVersion = tryExec('codex', ['--version']);
+
+  if (!codexVersion) {
+    throw new Error(
+      'Codex CLI was not detected. Install Codex before running `dm auth login codex`.'
+    );
+  }
+
+  if (!hasCodexLogin()) {
+    throw new Error('Codex CLI is installed but not authenticated. Run `codex login` first.');
+  }
+
+  return buildConfiguredLocalConfig(config, {
+    provider: 'codex',
+    model: config.provider === 'codex' ? (config.model ?? 'gpt-5-codex') : 'gpt-5-codex',
+    providerAuthMode: 'codex'
+  });
+}
+
+function buildAntigravityLocalConfig(config: LocalConfig): LocalConfig {
+  if (!hasAntigravityBinary()) {
+    throw new Error(
+      'Antigravity was not detected. Install Antigravity before running `dm auth login antigravity`.'
+    );
+  }
+
+  return buildConfiguredLocalConfig(config, {
+    provider: 'antigravity',
+    model:
+      config.provider === 'antigravity'
+        ? (config.model ?? 'antigravity-agent')
+        : 'antigravity-agent',
+    providerAuthMode: 'antigravity'
+  });
+}
+
+function buildApiLocalConfig(config: LocalConfig, explicitEnvVar?: string): LocalConfig {
+  const apiKeyEnvVar = explicitEnvVar ?? detectLocalApiKeySource();
+
+  if (!apiKeyEnvVar) {
+    throw new Error(
+      'No local API key detected. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, QWEN_API_KEY, or DASHSCOPE_API_KEY before running `dm auth login api`.'
+    );
+  }
+
+  if (!process.env[apiKeyEnvVar]?.trim()) {
+    throw new Error(`Environment variable ${apiKeyEnvVar} is not set.`);
+  }
+
+  return buildConfiguredLocalConfig(config, {
+    provider: 'api',
+    model: config.provider === 'api' ? (config.model ?? 'user-configured') : 'user-configured',
+    providerAuthMode: 'api',
+    providerApiKeyEnvVar: apiKeyEnvVar
+  });
+}
 
 function ensureHome(): void {
   mkdirSync(DIFFMINT_HOME, { recursive: true });
@@ -447,6 +681,9 @@ async function tryRemoteLogin(config: LocalConfig): Promise<LocalConfig> {
     ...config,
     apiBaseUrl,
     provider: bootstrap.provider.provider,
+    model: bootstrap.provider.defaultModel,
+    providerAuthMode: 'remote',
+    providerApiKeyEnvVar: undefined,
     role: bootstrap.role,
     policyVersionId: bootstrap.policy.policyVersionId,
     workspace: {
@@ -465,16 +702,7 @@ async function tryRemoteLogin(config: LocalConfig): Promise<LocalConfig> {
 }
 
 function buildLocalFallbackConfig(config: LocalConfig): LocalConfig {
-  return {
-    ...config,
-    apiBaseUrl: getApiBaseUrl(config),
-    workspace: config.workspace ?? {
-      id: 'ws_local',
-      name: 'Local Workspace'
-    },
-    provider: config.provider ?? 'qwen',
-    signedInAt: new Date().toISOString()
-  };
+  return buildConfiguredLocalConfig(config, getEffectiveProviderSelection(config));
 }
 
 function buildSyncQueueEntries(config: LocalConfig, session: ReviewSession): SyncQueueEntry[] {
@@ -523,6 +751,7 @@ async function flushSyncQueue(
   if (
     queuedEntries.length === 0 ||
     !config.workspace ||
+    !hasRemoteControlPlaneSession(config) ||
     config.syncDefaults?.cloudSyncEnabled === false
   ) {
     return {
@@ -569,7 +798,11 @@ async function syncReviewToCloud(
   config: LocalConfig,
   session: ReviewSession
 ): Promise<{ flushed: number; queued: boolean; queueSize: number }> {
-  if (!config.workspace || config.syncDefaults?.cloudSyncEnabled === false) {
+  if (
+    !config.workspace ||
+    !hasRemoteControlPlaneSession(config) ||
+    config.syncDefaults?.cloudSyncEnabled === false
+  ) {
     return {
       flushed: 0,
       queued: false,
@@ -625,7 +858,7 @@ async function syncReviewToCloud(
 }
 
 async function loadHistory(config: LocalConfig): Promise<ReviewSession[]> {
-  if (!config.workspace) {
+  if (!config.workspace || !hasRemoteControlPlaneSession(config)) {
     return readHistory();
   }
 
@@ -647,6 +880,7 @@ async function extendDoctorOutput(config: LocalConfig): Promise<DoctorCheck[]> {
   const checks = runDoctor(process.cwd());
   const queueSize = getSyncQueueSize();
   const convention = inspectReviewConvention(process.cwd());
+  const providerSelection = getEffectiveProviderSelection(config);
   const extendedChecks: DoctorCheck[] = [
     ...checks,
     {
@@ -655,7 +889,22 @@ async function extendDoctorOutput(config: LocalConfig): Promise<DoctorCheck[]> {
       status: config.signedInAt ? 'ok' : 'warn',
       detail: config.signedInAt
         ? `Signed in to ${config.workspace?.name ?? 'unknown workspace'}`
-        : 'Run `dm auth login` to connect a workspace.'
+        : 'Run `dm auth login`, `dm auth login codex`, `dm auth login antigravity`, or `dm auth login api`.'
+    },
+    {
+      id: 'selected-provider',
+      label: 'Selected provider',
+      status: providerSelection.provider ? 'ok' : 'warn',
+      detail: [
+        `Provider ${providerSelection.provider}`,
+        `mode ${providerSelection.providerAuthMode}`,
+        `model ${providerSelection.model}`,
+        providerSelection.providerApiKeyEnvVar
+          ? `key ${providerSelection.providerApiKeyEnvVar}`
+          : undefined
+      ]
+        .filter(Boolean)
+        .join(' · ')
     },
     {
       id: 'sync-queue',
@@ -675,7 +924,7 @@ async function extendDoctorOutput(config: LocalConfig): Promise<DoctorCheck[]> {
     }
   ];
 
-  if (!config.apiBaseUrl) {
+  if (!config.apiBaseUrl || !hasRemoteControlPlaneSession(config)) {
     return extendedChecks;
   }
 
@@ -719,21 +968,51 @@ async function main() {
 
   if (command === 'auth' && subcommand === 'login') {
     const config = readConfig();
+    const loginMode = rest[0];
     let nextConfig: LocalConfig;
 
-    try {
-      nextConfig = await tryRemoteLogin(config);
-    } catch (error) {
-      nextConfig = buildLocalFallbackConfig(config);
+    if (
+      loginMode &&
+      loginMode !== 'remote' &&
+      loginMode !== 'codex' &&
+      loginMode !== 'antigravity' &&
+      loginMode !== 'api'
+    ) {
+      throw new Error(`Unknown login mode "${loginMode}".`);
+    }
+
+    if (loginMode === 'codex') {
+      nextConfig = buildCodexLocalConfig(config);
+      console.log('Configured local Codex auth. Diffmint will keep provider auth on this machine.');
+    } else if (loginMode === 'antigravity') {
+      nextConfig = buildAntigravityLocalConfig(config);
       console.log(
-        `Control plane login unavailable, using local fallback: ${
-          error instanceof Error ? error.message : String(error)
-        }`
+        'Configured local Antigravity auth. Diffmint will keep provider auth on this machine.'
       );
+    } else if (loginMode === 'api') {
+      nextConfig = buildApiLocalConfig(config, rest[1]);
+      console.log(
+        'Configured local API-key auth. Diffmint will keep provider keys on this machine only.'
+      );
+    } else {
+      try {
+        nextConfig = await tryRemoteLogin(config);
+      } catch (error) {
+        nextConfig = buildLocalFallbackConfig(config);
+        console.log(
+          `Control plane login unavailable, using local fallback: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
     }
 
     writeConfig(nextConfig);
-    if (nextConfig.workspace && nextConfig.syncDefaults?.cloudSyncEnabled !== false) {
+    if (
+      nextConfig.workspace &&
+      nextConfig.syncDefaults?.cloudSyncEnabled !== false &&
+      hasRemoteControlPlaneSession(nextConfig)
+    ) {
       const flushResult = await flushSyncQueue(nextConfig);
       if (flushResult.flushed > 0) {
         console.log(`Flushed ${flushResult.flushed} queued sync item(s).`);
@@ -750,6 +1029,15 @@ async function main() {
     }
     if (nextConfig.provider) {
       console.log(`Provider: ${nextConfig.provider}`);
+    }
+    if (nextConfig.model) {
+      console.log(`Model: ${nextConfig.model}`);
+    }
+    if (nextConfig.providerAuthMode) {
+      console.log(`Auth mode: ${nextConfig.providerAuthMode}`);
+    }
+    if (nextConfig.providerApiKeyEnvVar) {
+      console.log(`API key env: ${nextConfig.providerApiKeyEnvVar}`);
     }
     return;
   }
@@ -785,14 +1073,35 @@ async function main() {
     const config = readConfig();
     writeConfig({
       ...config,
-      provider
+      provider,
+      model: resolveModelForProvider(config, provider),
+      providerAuthMode: inferProviderAuthMode(provider, config.providerAuthMode),
+      providerApiKeyEnvVar:
+        inferProviderAuthMode(provider, config.providerAuthMode) === 'api'
+          ? (config.providerApiKeyEnvVar ?? detectLocalApiKeySource())
+          : undefined
     });
     console.log(`Provider set to ${provider}.`);
     return;
   }
 
+  if (command === 'config' && subcommand === 'set-model') {
+    const model = rest[0];
+    if (!model) {
+      throw new Error('Expected a model name.');
+    }
+    const config = readConfig();
+    writeConfig({
+      ...config,
+      model
+    });
+    console.log(`Model set to ${model}.`);
+    return;
+  }
+
   if (command === 'review') {
     const config = readConfig();
+    const providerSelection = getEffectiveProviderSelection(config);
     const flags = parseFlags([subcommand, ...rest].filter(Boolean));
     const source =
       flags.files.length > 0 ? 'selected_files' : flags.baseRef ? 'branch_compare' : 'local_diff';
@@ -818,16 +1127,17 @@ async function main() {
       staged: flags.staged,
       outputFormat: flags.json ? 'json' : flags.markdown ? 'markdown' : 'terminal',
       mode: flags.mode as never,
-      localOnly: config.syncDefaults?.localOnlyDefault ?? false,
-      cloudSyncEnabled: config.syncDefaults?.cloudSyncEnabled ?? Boolean(config.workspace),
-      provider: config.provider ?? 'qwen',
-      model: 'qwen-code',
+      localOnly: config.syncDefaults?.localOnlyDefault ?? !hasRemoteControlPlaneSession(config),
+      cloudSyncEnabled:
+        config.syncDefaults?.cloudSyncEnabled ?? hasRemoteControlPlaneSession(config),
+      provider: providerSelection.provider,
+      model: providerSelection.model,
       policy
     });
     const session = await createReviewSessionWithRuntime(request, {
       cwd: process.cwd(),
-      provider: config.provider ?? 'qwen',
-      model: 'qwen-code',
+      provider: providerSelection.provider,
+      model: providerSelection.model,
       policy
     });
     appendHistory(session);

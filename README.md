@@ -1,14 +1,50 @@
 # Diffmint
 
-Diffmint is a local-first, policy-driven code review product.
+Local-first, policy-driven code review for teams that live in the CLI and VS Code.
 
-- Primary experience: CLI and VS Code extension
-- Web role: control plane for workspaces, providers, Polar billing, policies, history, audit, and docs
-- Package manager: `pnpm`
-- Production domain: [diffmint.deplio.app](https://diffmint.deplio.app)
-- Local dev stack: `Docker Compose` with hot reload and Postgres
+Diffmint combines three surfaces:
 
-## Monorepo
+- a CLI for local review flows
+- a VS Code extension companion
+- a web control plane for workspaces, policies, providers, history, audit, docs, and optional billing
+
+Demo: [diffmint.deplio.app](https://diffmint.deplio.app)
+
+## Why Diffmint
+
+Most review tooling forces developers into a remote web UI too early. Diffmint keeps the primary loop local, then syncs the parts that matter operationally:
+
+- review local diffs before a PR exists
+- attach workspace policy to synced sessions
+- keep audit, history, provider configuration, and docs in one control plane
+- support self-hosted deployment with Postgres-backed persistence
+
+## Status
+
+Diffmint is an active open source monorepo and is usable for local evaluation and self-hosting.
+
+Current maturity:
+
+- CLI: working local-first review/auth/history flows
+- Web control plane: working workspace, provider, policy, history, audit, docs, and billing surfaces
+- VS Code: working command integration, with packaging and release polish still in progress
+
+Production note:
+
+- the web control plane requires persistent storage in production
+- when `NODE_ENV=production`, the app now fails fast without `DATABASE_URL`
+
+## Highlights
+
+- `dm auth login` device flow with browser approval
+- `dm review`, `dm explain`, `dm tests`, `dm history`, `dm doctor`
+- workspace-scoped policies and provider configuration
+- synced review history and audit trail
+- public docs plus dashboard docs center from one MDX source
+- optional Clerk auth and optional Polar billing integration
+- Dokploy-ready Docker Compose deployment
+
+## Monorepo Layout
 
 ```text
 apps/
@@ -16,17 +52,121 @@ apps/
   cli/       dm CLI
   vscode/    VS Code extension companion
 packages/
-  contracts/      shared types and API contracts
-  review-core/    local review runtime scaffold
-  policy-engine/  policy bundle and prompt helpers
-  docs-content/   git-managed MDX docs source
+  contracts/      shared API contracts and types
+  review-core/    local review runtime and orchestration
+  policy-engine/  policy bundle generation and review rules
+  docs-content/   versioned MDX documentation source
+docs/
+  project docs and implementation notes
 ```
 
-## Product surfaces
+## Tech Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- pnpm workspaces
+- Clerk for auth and organizations
+- Postgres + Drizzle ORM for persistent control-plane state
+- Polar for optional billing flows
+
+## Quick Start
+
+### Requirements
+
+- Node.js 22+
+- pnpm 10+
+- Postgres 16+ for persistent local or production state
+
+### Local Development
+
+```bash
+pnpm install
+cp apps/web/env.example.txt apps/web/.env.local
+pnpm dev
+```
+
+Default local surface:
+
+- web app: `http://localhost:3000`
+
+### Database Setup
+
+If you want persistent control-plane state outside Docker:
+
+```bash
+pnpm db:migrate
+pnpm db:seed
+```
+
+`db:seed` initializes the default control-plane records. It does not inject fake review history into the app.
+
+### Docker Development
+
+```bash
+pnpm docker:dev
+pnpm docker:dev:logs
+pnpm docker:dev:down
+pnpm docker:dev:reset
+```
+
+This starts:
+
+- the web app on `http://localhost:3000`
+- Postgres on `localhost:5432`
+- migration and seed flow before app startup
+
+Health endpoints:
+
+- live: `/api/health/live`
+- ready: `/api/health/ready`
+
+## Deploying With Dokploy
+
+Use [docker-compose.dokploy.yml](./docker-compose.dokploy.yml) for one-shot deployment on Dokploy.
+
+Recommended flow:
+
+```bash
+cp dokploy.env.example .env.dokploy
+docker compose -f docker-compose.dokploy.yml --env-file .env.dokploy config
+```
+
+Then add the values from [dokploy.env.example](./dokploy.env.example) into Dokploy and deploy the compose stack.
+
+What the Dokploy stack does:
+
+- starts Postgres with a persistent volume
+- runs `pnpm --dir apps/web db:migrate` once before the app boots
+- builds the production web image from `apps/web/Dockerfile`
+- keeps the app listening on container port `3000` without binding that port on the host
+- forces persistent control-plane storage with `DIFFMINT_REQUIRE_PERSISTENCE=true`
+
+## Environment
+
+Reference values live in [apps/web/env.example.txt](./apps/web/env.example.txt).
+
+Main groups:
+
+- Auth: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
+- Database: `DATABASE_URL`
+- Persistence policy: `DIFFMINT_REQUIRE_PERSISTENCE`
+- Billing: `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_PRODUCT_ID_*`, `POLAR_SERVER`
+- App URLs: `DIFFMINT_APP_URL`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_SITE_URL`
+- Release signing: `DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY`, `DIFFMINT_RELEASE_SIGNING_KEY_ID`
+- Security headers: `DIFFMINT_ENABLE_HSTS`
+
+Useful local override:
+
+```bash
+DIFFMINT_DISABLE_CLERK=true NEXT_PUBLIC_DIFFMINT_DISABLE_CLERK=true pnpm start:web
+```
+
+## Product Surfaces
 
 ### CLI
 
-Implemented command surface:
+Implemented commands:
 
 - `dm auth login`
 - `dm auth logout`
@@ -37,21 +177,9 @@ Implemented command surface:
 - `dm history`
 - `dm doctor`
 
-Current status:
+### VS Code
 
-- command UX works
-- device auth now includes browser approval, and bootstrap/history sync use approved client sessions
-- local scaffold review works with offline fallback
-- review commands now switch to Qwen headless mode automatically when a local `qwen` binary and
-  compatible provider credentials are available
-- offline sync queue preserves review uploads until the control plane is reachable again
-- history is stored locally and can sync to the web control plane
-- scaffold mode remains available through `DIFFMINT_REVIEW_RUNTIME=scaffold` for deterministic local
-  runs and CI
-
-### VS Code extension
-
-Implemented command surface:
+Implemented commands:
 
 - Review Current Changes
 - Review Staged Changes
@@ -62,15 +190,9 @@ Implemented command surface:
 - Open Team Rules
 - Sign In
 
-Current status:
+### Web
 
-- extension builds
-- commands invoke the CLI
-- production packaging and deeper IDE polish are still pending
-
-### Web control plane
-
-Active routes:
+Primary routes:
 
 - `/dashboard/overview`
 - `/dashboard/workspaces`
@@ -84,164 +206,11 @@ Active routes:
 - `/docs/[...slug]`
 - `/install`
 
-Removed starter/demo routes:
-
-- products
-- users
-- chat
-- notifications
-- forms
-- kanban
-- react-query demo
-- exclusive page
-- starter overview charts
-
-## Billing
-
-Billing is now oriented around `Polar`.
-
-Implemented billing pieces:
-
-- Polar environment/config helpers
-- Polar checkout route: `/api/polar/checkout`
-- Polar customer portal route: `/api/polar/portal`
-- Polar webhook route: `/api/polar/webhooks`
-- Polar-backed billing control-plane page
-- Admin doc: `/docs/admin/billing-with-polar`
-
-Important:
-
-- auth and workspace management still use Clerk
-- billing and subscriptions use Polar
-- billing state is wired into the shared control-plane service and persisted when `DATABASE_URL` is set
-- Polar webhooks now update the billing snapshot and audit trail; signature validation and richer reconciliation remain to be hardened
-
-## Getting started
-
-### Local
-
-```bash
-pnpm install
-cp apps/web/env.example.txt apps/web/.env.local
-pnpm dev
-```
-
-If you want Postgres-backed control-plane state outside Docker, set `DATABASE_URL` and then run:
-
-```bash
-pnpm db:migrate
-pnpm db:seed
-```
-
-For production-like environments, also set `DIFFMINT_REQUIRE_PERSISTENCE=true` so the control plane
-fails fast when Postgres is unavailable instead of silently falling back to in-memory state.
-
-### Docker
-
-```bash
-pnpm docker:dev
-pnpm docker:dev:logs
-pnpm docker:dev:down
-pnpm docker:dev:reset
-```
-
-The Docker stack starts:
-
-- Next.js web app on `http://localhost:3000`
-- Postgres on `localhost:5432`
-- migrations and seed data before the web server boots
-
-Production builds use webpack for stability. Development keeps the normal `next dev` workflow for hot reload.
-
-Runtime probes:
-
-- live: `/api/health/live`
-- ready: `/api/health/ready`
-
-The Docker dev stack and production image now use the readiness endpoint for health checks.
-
-### Dokploy
-
-Use [docker-compose.dokploy.yml](/home/scpc/Documents/my-workspace/dev-flow/docker-compose.dokploy.yml) for one-shot deployment on Dokploy.
-
-Recommended flow:
-
-```bash
-cp dokploy.env.example .env.dokploy
-docker compose -f docker-compose.dokploy.yml --env-file .env.dokploy config
-```
-
-Then copy the values from [dokploy.env.example](/home/scpc/Documents/my-workspace/dev-flow/dokploy.env.example) into Dokploy environment variables and deploy the compose stack.
-
-What this stack does:
-
-- starts Postgres with a persistent volume
-- runs `pnpm --dir apps/web db:migrate` once before the app boots
-- builds the production web image from `apps/web/Dockerfile`
-- forces persistent control-plane storage in production via `DIFFMINT_REQUIRE_PERSISTENCE=true`
-
-## Environment
-
-Core variables live in [apps/web/env.example.txt](/home/scpc/Documents/my-workspace/dev-flow/apps/web/env.example.txt).
-
-Main groups:
-
-- Clerk auth: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`
-- Clerk local smoke override: `DIFFMINT_DISABLE_CLERK`, `NEXT_PUBLIC_DIFFMINT_DISABLE_CLERK`
-- Postgres: `DATABASE_URL`
-- strict persistence mode: `DIFFMINT_REQUIRE_PERSISTENCE`
-- Polar billing: `POLAR_ACCESS_TOKEN`, `POLAR_WEBHOOK_SECRET`, `POLAR_PRODUCT_ID_*`, `POLAR_SERVER`
-- App URL: `DIFFMINT_APP_URL`
-- release signing: `DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY`, `DIFFMINT_RELEASE_SIGNING_KEY_ID`
-- web security hardening: `DIFFMINT_ENABLE_HSTS`
-
-The web app now emits baseline security headers for pages and APIs, including `X-Frame-Options`,
-`Referrer-Policy`, and `Permissions-Policy`. `Strict-Transport-Security` is enabled in production
-and can be forced on with `DIFFMINT_ENABLE_HSTS=true`.
-
-For local production smoke tests, you can force public-mode auth behavior even if your machine has
-Clerk keys in `apps/web/.env`:
-
-```bash
-DIFFMINT_DISABLE_CLERK=true NEXT_PUBLIC_DIFFMINT_DISABLE_CLERK=true pnpm start:web
-```
-
-The public release manifest endpoint can also sign CLI and VS Code release metadata when
-`DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY` is set. Signed manifests include a stable `signature`
-envelope with `algorithm`, `keyId`, `signedAt`, and `value`, which keeps updater and release
-channel clients on a verifiable contract without changing the endpoint shape.
-
-## Testing
-
-```bash
-pnpm db:generate
-pnpm db:migrate
-pnpm db:seed
-pnpm test:unit
-pnpm test:e2e:install
-pnpm test:e2e
-pnpm test
-pnpm check
-```
-
-What is covered now:
-
-- docs-content loaders and navigation
-- review-core request/session logic
-- review-core runtime switching between scaffold mode and Qwen headless execution
-- CLI login/provider/review/history flows
-- control-plane service lifecycle for device auth, synced history, usage, and audit events
-- approved client-session checks for bootstrap, policies, history, and usage routes
-- dashboard access rules for authenticated and workspace-scoped pages
-- Polar route guardrails and billing helpers
-- public docs/install smoke flows
-- client bootstrap API smoke
-
-## Docs
+## Documentation
 
 Canonical docs live in `packages/docs-content/content`.
 
-Key pages:
+Useful entry points:
 
 - `/docs/getting-started/5-minute-quickstart`
 - `/docs/getting-started/docker-development`
@@ -249,12 +218,53 @@ Key pages:
 - `/docs/admin/billing-with-polar`
 - `/docs/security/privacy-and-redaction`
 
-## Current reality
+## Testing
 
-This repo now looks like Diffmint instead of the original dashboard starter, but a few production-critical systems are still being hardened:
+```bash
+pnpm test:unit
+pnpm test:e2e:install
+pnpm test:e2e
+pnpm check
+```
 
-- advanced billing reconciliation beyond the current webhook snapshot updates
-- extension packaging/release flow
+The test suite currently covers:
 
-The foundation, cleanup, docs, Docker flow, persistence-aware control plane, test harness, and
-Polar billing direction are in place.
+- docs-content loading and navigation
+- review-core request/session logic
+- CLI auth/provider/review/history flows
+- control-plane service lifecycle
+- client API auth and sync routes
+- dashboard workspace scoping
+- Polar helper and route guardrails
+- public docs and install smoke flows
+
+## Roadmap
+
+Areas still being hardened:
+
+- release manifest publishing and updater flow
+- VS Code packaging and release polish
+- deeper billing reconciliation beyond the current webhook-driven snapshot updates
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+Recommended contributor flow:
+
+```bash
+pnpm install
+pnpm check
+pnpm test:unit
+```
+
+If your change touches the web control plane and persistence-sensitive paths, also run:
+
+```bash
+pnpm db:migrate
+pnpm build
+```
+
+## License
+
+MIT. See [LICENSE](./LICENSE).

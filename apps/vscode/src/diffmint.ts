@@ -12,6 +12,9 @@ export interface DiffmintLocalWorkspace {
 export interface DiffmintLocalConfig {
   apiBaseUrl?: string;
   provider?: string;
+  model?: string;
+  providerAuthMode?: 'remote' | 'codex' | 'antigravity' | 'api';
+  providerApiKeyEnvVar?: string;
   workspace?: DiffmintLocalWorkspace;
   role?: string;
   policyVersionId?: string;

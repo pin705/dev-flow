@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type {
   Finding,
@@ -63,11 +64,12 @@ export interface ReviewSessionSanitizationOptions {
   omitRawProviderOutput?: boolean;
 }
 
-interface QwenHeadlessResult {
+interface HeadlessRuntimeResult {
   findings: Finding[];
   summary: string;
   durationMs: number;
   rawOutput: string;
+  artifactLabel: string;
 }
 
 interface ParsedDiffFile {
@@ -471,9 +473,7 @@ export function previewHeadlessCommand(request: ReviewRequest, policy?: PolicyBu
   return baseArgs;
 }
 
-function findQwenBinary(cwd: string): string | null {
-  const candidates = ['qwen', 'qwen-code', 'qwen-code-cli'];
-
+function findBinary(cwd: string, candidates: string[]): string | null {
   for (const candidate of candidates) {
     if (tryRun(candidate, ['--version'], cwd)) {
       return candidate;
@@ -483,19 +483,61 @@ function findQwenBinary(cwd: string): string | null {
   return null;
 }
 
-function hasHeadlessAuthConfig(): boolean {
-  return Boolean(
-    process.env.OPENAI_API_KEY ||
-    process.env.QWEN_API_KEY ||
-    process.env.DASHSCOPE_API_KEY ||
-    process.env.ANTHROPIC_API_KEY
-  );
+function findQwenBinary(cwd: string): string | null {
+  return findBinary(cwd, ['qwen', 'qwen-code', 'qwen-code-cli']);
 }
 
-function shouldUseQwenRuntime(cwd: string): boolean {
+function findCodexBinary(cwd: string): string | null {
+  return findBinary(cwd, ['codex']);
+}
+
+function findAntigravityBinary(cwd: string): string | null {
+  return findBinary(cwd, ['antigravity']);
+}
+
+function detectLocalApiKeySource(): string | null {
+  const candidates = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', 'QWEN_API_KEY', 'DASHSCOPE_API_KEY'];
+
+  for (const candidate of candidates) {
+    if (process.env[candidate]?.trim()) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+function hasCodexAuthConfig(cwd: string): boolean {
+  const loginStatus = tryRun('codex', ['login', 'status'], cwd);
+  return Boolean(loginStatus && loginStatus.toLowerCase().startsWith('logged in'));
+}
+
+function hasHeadlessAuthConfig(): boolean {
+  return Boolean(detectLocalApiKeySource());
+}
+
+function shouldUseCodexRuntime(cwd: string, provider?: string): boolean {
+  const forcedMode = process.env.DIFFMINT_REVIEW_RUNTIME;
+
+  if (forcedMode === 'scaffold' || forcedMode === 'qwen') {
+    return false;
+  }
+
+  if (forcedMode === 'codex') {
+    return Boolean(findCodexBinary(cwd) && hasCodexAuthConfig(cwd));
+  }
+
+  return provider === 'codex' && Boolean(findCodexBinary(cwd) && hasCodexAuthConfig(cwd));
+}
+
+function shouldUseQwenRuntime(cwd: string, provider?: string): boolean {
   const forcedMode = process.env.DIFFMINT_REVIEW_RUNTIME;
 
   if (forcedMode === 'scaffold') {
+    return false;
+  }
+
+  if (forcedMode === 'codex') {
     return false;
   }
 
@@ -503,7 +545,7 @@ function shouldUseQwenRuntime(cwd: string): boolean {
     return Boolean(findQwenBinary(cwd));
   }
 
-  return Boolean(findQwenBinary(cwd) && hasHeadlessAuthConfig());
+  return Boolean(provider?.startsWith('qwen') && findQwenBinary(cwd) && hasHeadlessAuthConfig());
 }
 
 function extractAssistantTextFromQwenPayload(payload: unknown): string | null {
@@ -602,7 +644,58 @@ function normalizeFindingFromQwen(value: unknown): Finding | null {
   };
 }
 
-function parseQwenHeadlessOutput(rawOutput: string): QwenHeadlessResult | null {
+function parseStructuredReviewText(
+  rawText: string,
+  rawOutput: string,
+  options: {
+    emptySummary: string;
+    nonJsonSummaryPrefix: string;
+    artifactLabel: string;
+  }
+): HeadlessRuntimeResult | null {
+  const embeddedJson = extractJsonObject(rawText);
+
+  if (!embeddedJson) {
+    const summary = rawText.trim();
+
+    if (!summary) {
+      return null;
+    }
+
+    return {
+      findings: [],
+      summary: `${options.nonJsonSummaryPrefix} ${summary}`.trim(),
+      durationMs: 1000,
+      rawOutput,
+      artifactLabel: options.artifactLabel
+    };
+  }
+
+  const reviewPayload = JSON.parse(embeddedJson) as {
+    summary?: unknown;
+    findings?: unknown[];
+  };
+  const findings =
+    reviewPayload.findings
+      ?.map((finding) => normalizeFindingFromQwen(finding))
+      .filter((finding): finding is Finding => Boolean(finding)) ?? [];
+  const summary =
+    typeof reviewPayload.summary === 'string' && reviewPayload.summary.trim().length > 0
+      ? reviewPayload.summary.trim()
+      : findings.length === 0
+        ? options.emptySummary
+        : `${options.nonJsonSummaryPrefix} ${findings.length} structured findings.`.trim();
+
+  return {
+    findings,
+    summary,
+    durationMs: 1000,
+    rawOutput,
+    artifactLabel: options.artifactLabel
+  };
+}
+
+function parseQwenHeadlessOutput(rawOutput: string): HeadlessRuntimeResult | null {
   try {
     const payload = JSON.parse(rawOutput) as unknown;
     const assistantText = extractAssistantTextFromQwenPayload(payload);
@@ -611,47 +704,28 @@ function parseQwenHeadlessOutput(rawOutput: string): QwenHeadlessResult | null {
       return null;
     }
 
-    const embeddedJson = extractJsonObject(assistantText);
-
-    if (!embeddedJson) {
-      return {
-        findings: [],
-        summary: assistantText.trim(),
-        durationMs: 1000,
-        rawOutput
-      };
-    }
-
-    const reviewPayload = JSON.parse(embeddedJson) as {
-      summary?: unknown;
-      findings?: unknown[];
-    };
-    const findings =
-      reviewPayload.findings
-        ?.map((finding) => normalizeFindingFromQwen(finding))
-        .filter((finding): finding is Finding => Boolean(finding)) ?? [];
-    const summary =
-      typeof reviewPayload.summary === 'string' && reviewPayload.summary.trim().length > 0
-        ? reviewPayload.summary.trim()
-        : findings.length === 0
-          ? 'Qwen completed the headless review with no structured findings.'
-          : `Qwen completed the headless review with ${findings.length} structured findings.`;
-
-    return {
-      findings,
-      summary,
-      durationMs: 1000,
-      rawOutput
-    };
+    return parseStructuredReviewText(assistantText, rawOutput, {
+      emptySummary: 'Qwen completed the headless review with no structured findings.',
+      nonJsonSummaryPrefix: 'Qwen completed the headless review with',
+      artifactLabel: 'Qwen Headless Output'
+    });
   } catch {
     return null;
   }
 }
 
+function parseCodexHeadlessOutput(rawOutput: string): HeadlessRuntimeResult | null {
+  return parseStructuredReviewText(rawOutput, rawOutput, {
+    emptySummary: 'Codex completed the headless review with no structured findings.',
+    nonJsonSummaryPrefix: 'Codex completed the headless review with',
+    artifactLabel: 'Codex Exec Output'
+  });
+}
+
 function runQwenHeadlessReview(
   request: ReviewRequest,
   options: CreateReviewSessionRuntimeOptions
-): QwenHeadlessResult | null {
+): HeadlessRuntimeResult | null {
   const cwd = options.cwd ?? request.metadata.cwd;
   const qwenBinary = findQwenBinary(cwd);
 
@@ -692,6 +766,65 @@ function runQwenHeadlessReview(
     };
   } catch {
     return null;
+  }
+}
+
+function runCodexHeadlessReview(
+  request: ReviewRequest,
+  options: CreateReviewSessionRuntimeOptions
+): HeadlessRuntimeResult | null {
+  const cwd = options.cwd ?? request.metadata.cwd;
+  const codexBinary = findCodexBinary(cwd);
+
+  if (!codexBinary || !hasCodexAuthConfig(cwd)) {
+    return null;
+  }
+
+  const outputDir = mkdtempSync(path.join(tmpdir(), 'diffmint-codex-'));
+  const lastMessagePath = path.join(outputDir, 'last-message.txt');
+  const startedAt = Date.now();
+
+  try {
+    execFileSync(
+      codexBinary,
+      [
+        'exec',
+        '--skip-git-repo-check',
+        '--color',
+        'never',
+        '--output-last-message',
+        lastMessagePath,
+        ...((options.model ?? request.metadata.model)
+          ? ['--model', options.model ?? request.metadata.model ?? 'gpt-5-codex']
+          : []),
+        '-'
+      ],
+      {
+        cwd,
+        encoding: 'utf8',
+        input: buildHeadlessReviewPrompt(request, options.policy),
+        stdio: ['pipe', 'pipe', 'pipe']
+      }
+    );
+
+    if (!existsSync(lastMessagePath)) {
+      return null;
+    }
+
+    const parsed = parseCodexHeadlessOutput(readFileSync(lastMessagePath, 'utf8'));
+
+    if (!parsed) {
+      return null;
+    }
+
+    return {
+      ...parsed,
+      durationMs: Math.max(Date.now() - startedAt, 1)
+    };
+  } catch {
+    return null;
+  } finally {
+    rmSync(outputDir, { recursive: true, force: true });
   }
 }
 
@@ -825,8 +958,64 @@ export async function createReviewSessionWithRuntime(
   options: CreateReviewSessionRuntimeOptions = {}
 ): Promise<ReviewSession> {
   const cwd = options.cwd ?? request.metadata.cwd;
+  const requestedProvider = options.provider ?? request.metadata.provider;
 
-  if (!shouldUseQwenRuntime(cwd)) {
+  if (shouldUseCodexRuntime(cwd, requestedProvider)) {
+    const runtimeResult = runCodexHeadlessReview(request, options);
+
+    if (runtimeResult) {
+      const diffFiles = parseDiffFiles(request.diff);
+      const findings = runtimeResult.findings.map((finding) =>
+        enrichFindingLocation(finding, request, diffFiles)
+      );
+      const startedAt = new Date().toISOString();
+      const completedAt = new Date().toISOString();
+      const context = request.metadata.context ?? buildReviewContextSummary(request);
+
+      return {
+        id: randomUUID(),
+        traceId: request.traceId,
+        requestId: request.id,
+        source: request.source,
+        commandSource: request.commandSource,
+        provider: requestedProvider ?? 'codex',
+        model: options.model ?? request.metadata.model ?? 'gpt-5-codex',
+        policyVersionId: request.policyVersionId,
+        status: 'completed',
+        findings,
+        context,
+        convention: request.metadata.convention,
+        summary: runtimeResult.summary,
+        severityCounts: {
+          low: countSeverity(findings, 'low'),
+          medium: countSeverity(findings, 'medium'),
+          high: countSeverity(findings, 'high'),
+          critical: countSeverity(findings, 'critical')
+        },
+        durationMs: runtimeResult.durationMs,
+        startedAt,
+        completedAt,
+        artifacts: [
+          {
+            id: randomUUID(),
+            kind: 'terminal',
+            label: 'Terminal Summary',
+            mimeType: 'text/plain',
+            content: renderTerminalSession(request, findings)
+          },
+          {
+            id: randomUUID(),
+            kind: 'raw-provider-output',
+            label: runtimeResult.artifactLabel,
+            mimeType: 'application/json',
+            content: runtimeResult.rawOutput
+          }
+        ]
+      };
+    }
+  }
+
+  if (!shouldUseQwenRuntime(cwd, requestedProvider)) {
     return createReviewSession(request);
   }
 
@@ -878,7 +1067,7 @@ export async function createReviewSessionWithRuntime(
       {
         id: randomUUID(),
         kind: 'raw-provider-output',
-        label: 'Qwen Headless Output',
+        label: runtimeResult.artifactLabel,
         mimeType: 'application/json',
         content: runtimeResult.rawOutput
       }
@@ -923,10 +1112,14 @@ export function sanitizeReviewSessionForCloudSync(
 
 export function runDoctor(cwd: string): DoctorCheck[] {
   const gitVersion = tryRun('git', ['--version'], cwd);
+  const codexVersion = tryRun('codex', ['--version'], cwd);
+  const codexLoginStatus = codexVersion ? tryRun('codex', ['login', 'status'], cwd) : null;
+  const antigravityVersion = tryRun('antigravity', ['--version'], cwd);
   const qwenVersion =
     tryRun('qwen', ['--version'], cwd) ??
     tryRun('qwen-code', ['--version'], cwd) ??
     tryRun('qwen-code-cli', ['--version'], cwd);
+  const apiKeySource = detectLocalApiKeySource();
 
   return [
     {
@@ -936,10 +1129,35 @@ export function runDoctor(cwd: string): DoctorCheck[] {
       detail: gitVersion ?? 'Git is not available in PATH.'
     },
     {
+      id: 'codex',
+      label: 'Codex',
+      status:
+        codexVersion && codexLoginStatus?.toLowerCase().startsWith('logged in') ? 'ok' : 'warn',
+      detail: codexVersion
+        ? `${codexVersion}${codexLoginStatus ? ` · ${codexLoginStatus}` : ' · run `codex login`'}`
+        : 'Codex CLI was not detected. Install Codex or keep Diffmint in scaffold mode.'
+    },
+    {
+      id: 'antigravity',
+      label: 'Antigravity',
+      status: antigravityVersion ? 'ok' : 'warn',
+      detail: antigravityVersion
+        ? `${antigravityVersion} · local desktop auth can stay on the user machine.`
+        : 'Antigravity was not detected. Local desktop BYOK flow is unavailable.'
+    },
+    {
       id: 'qwen',
       label: 'Qwen Code',
       status: qwenVersion ? 'ok' : 'warn',
       detail: qwenVersion ?? 'Qwen Code was not detected. Review runs will stay in scaffold mode.'
+    },
+    {
+      id: 'api-key',
+      label: 'Local API key',
+      status: apiKeySource ? 'ok' : 'warn',
+      detail: apiKeySource
+        ? `${apiKeySource} detected. Diffmint does not store provider keys on the server.`
+        : 'No local API key detected. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, QWEN_API_KEY, or DASHSCOPE_API_KEY for BYOK API mode.'
     },
     {
       id: 'api',

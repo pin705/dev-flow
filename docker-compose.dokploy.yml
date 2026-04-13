@@ -79,8 +79,8 @@ services:
       DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY: ${DIFFMINT_RELEASE_SIGNING_PRIVATE_KEY:-}
       DIFFMINT_RELEASE_SIGNING_KEY_ID: ${DIFFMINT_RELEASE_SIGNING_KEY_ID:-}
       DIFFMINT_ENABLE_HSTS: ${DIFFMINT_ENABLE_HSTS:-true}
-    ports:
-      - "${APP_PORT:-3000}:3000"
+    expose:
+      - "3000"
     healthcheck:
       test:
         [

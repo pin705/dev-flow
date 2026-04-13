@@ -34,7 +34,14 @@ export interface WorkspaceRef {
 
 export interface ProviderConfigSummary {
   id: string;
-  provider: 'qwen' | 'openai-compatible' | 'anthropic-compatible' | 'custom';
+  provider:
+    | 'codex'
+    | 'antigravity'
+    | 'api'
+    | 'qwen'
+    | 'openai-compatible'
+    | 'anthropic-compatible'
+    | 'custom';
   mode: 'managed' | 'byok';
   defaultModel: string;
   allowedModels: string[];
